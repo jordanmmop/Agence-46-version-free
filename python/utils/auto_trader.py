@@ -330,6 +330,18 @@ class AutoTrader:
             now = time.time()
 
             if now >= next_analyse and self._running and gen == self._generation:
+                # Abonnement Pro perdu EN COURS DE ROUTE (expiration, licence
+                # retirée) : le trading automatique s'arrête de lui-même. Sans
+                # ce contrôle, une boucle démarrée sous abonnement valide
+                # continuerait à passer des ordres RÉELS indéfiniment après
+                # l'expiration — la garde posée sur /api/auto-trader/start ne
+                # protège que le démarrage.
+                if not self._automatisation_autorisee():
+                    self._ajouter_erreur(
+                        "Trading automatique arrêté : l'abonnement Pro n'est plus actif.")
+                    logger.warning("[Auto-trader] Abonnement Pro inactif — arrêt de la boucle")
+                    self.stop()
+                    return
                 # Suspendu par le kill-switch : on n'analyse plus (donc plus
                 # aucune ouverture), mais la boucle et la surveillance des
                 # positions restent vivantes.
@@ -340,6 +352,23 @@ class AutoTrader:
             self._rapport_quotidien_si_du()
             self._purge_quotidienne_si_due()
             time.sleep(1)
+
+    @staticmethod
+    def _automatisation_autorisee() -> bool:
+        """L'abonnement couvre-t-il encore le trading automatique ?
+
+        En cas de doute — couche licence injoignable, import cassé — on répond
+        OUI. Couper une boucle qui a des positions réelles ouvertes à cause
+        d'une erreur interne serait bien plus grave que de laisser tourner un
+        cycle de trop : l'utilisateur ne pourrait plus ni surveiller ni
+        protéger ses positions.
+        """
+        try:
+            from licence import gate
+            return gate.autorise("automatisations")
+        except Exception as e:
+            logger.warning(f"[licence] Vérification d'abonnement impossible ({e}) — boucle maintenue")
+            return True
 
     # ── Boucle de PROTECTION des positions (thread dédié) ─────────────
     def _boucle_positions(self, gen: int):

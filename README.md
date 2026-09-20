@@ -134,6 +134,67 @@ la fois l'application (`/api/health`), la fiche de propriétés de l'exe et
 l'assistant d'installation. Pour publier une nouvelle version, modifiez ce
 fichier puis relancez `build_installer.bat`.
 
+## Version d'essai et version Pro
+
+L'application se distribue en deux niveaux. Le détail complet — limites,
+comparatif et mode d'abonnement — est dans
+[`RELEASE_NOTES_TRIAL.md`](RELEASE_NOTES_TRIAL.md).
+
+| | Essai | Pro |
+|---|---|---|
+| Agents IA utilisables | 6 / 45 | 45 / 45 |
+| Requêtes IA par jour / par heure | 20 / 5 | illimité \* |
+| Symboles par analyse | 1 | illimité \* |
+| Backtest, pré-vol, rapports | ❌ | ✅ |
+| Trading automatique, automatisations | ❌ | ✅ |
+| Tâches en arrière-plan | ❌ | ✅ |
+| Paramètres avancés, multi-comptes | ❌ | ✅ |
+
+\* Sous réserve des limites techniques (vitesse du moteur IA local,
+disponibilité des cours).
+
+**Aucun agent n'a été supprimé.** Les 45 restent dans le projet, instanciés et
+affichés ; en version d'essai, 39 d'entre eux portent un cadenas et ne
+participent pas aux cycles. C'est volontaire : l'essai doit laisser découvrir
+ce que l'abonnement apporte.
+
+### Comment les limites tiennent
+
+```
+Abonnement / Licence   →   Feature Gate   →   Agents IA / Fonctionnalités
+  (licence/abonnement)      (licence/gate)     (agents/, backend/)
+```
+
+Toutes les valeurs sont dans **`python/licence/config.py`**, et nulle part
+ailleurs — les changer là suffit. Elles ne sont volontairement PAS réglables
+par variable d'environnement : une limite qu'un fichier texte relève n'est pas
+une limite.
+
+Les restrictions sont appliquées **par le serveur**, jamais par l'interface :
+
+- le statut Pro exige une **licence signée** (Ed25519) par l'émetteur ; aucune
+  valeur locale — config, variable d'environnement, stockage du navigateur —
+  ne l'accorde ;
+- l'application n'embarque que la **clé publique**, qui permet seulement de
+  vérifier une signature, jamais d'en fabriquer une ;
+- le plafond d'agents est appliqué **dans le Chef d'Orchestre**, le quota
+  **en base et par compte** ;
+- si l'abonnement expire pendant que le trading automatique tourne, la boucle
+  **s'arrête d'elle-même**.
+
+Une licence valide reste valable **hors ligne** jusqu'à son expiration.
+
+### Abonnement
+
+L'architecture est en place, mais **aucun prestataire de paiement n'est
+raccordé à ce jour** : rien n'est simulé, et l'activation dit ce qui manque.
+Deux chemins sont prévus — un émetteur HTTPS (`LICENCE_API_URL`) ou
+l'extension Microsoft Store. Une clé déjà en votre possession s'active depuis
+**Réglages ⚙️ → Offre & abonnement**.
+
+L'application est également disponible sur le
+[Microsoft Store](https://apps.microsoft.com/detail/9nltgfr2btsp?hl=fr-FR&gl=FR).
+
 ## Code d'accès : aucun par défaut
 
 L'application ne demande **aucun code** au lancement. Elle s'ouvre
@@ -199,6 +260,12 @@ d'environnement de l'hébergeur — sans toucher une ligne de code.
 ```
 ├── python/
 │   ├── agents/            46 agents IA + 46 assistants (préparation/vérification)
+│   ├── licence/           offre Essai / Pro — LE point de passage des limites
+│   │   ├── config.py          SOURCE UNIQUE des limites (6 agents, 20/jour…)
+│   │   ├── gate.py            feature gate : agents, quotas, fonctionnalités
+│   │   ├── abonnement.py      état de licence, activation, identité du compte
+│   │   ├── verification.py    licence signée Ed25519 (clé PUBLIQUE embarquée)
+│   │   └── quota.py           compteur de requêtes, par compte, en base
 │   ├── utils/
 │   │   ├── auto_trader.py     boucle autonome (analyse → protections → ordre)
 │   │   ├── mt5_manager.py     MetaTrader 5 : démarrage portable, connexion,
@@ -216,8 +283,9 @@ d'environnement de l'hébergeur — sans toucher une ligne de code.
 │   │   ├── version.py         version unique (lue du fichier VERSION)
 │   │   ├── mise_a_jour.py     socle de mise à jour (désactivé par défaut)
 │   │   └── database.py        SQLite (signaux, ordres, portefeuille)
-│   └── tests/             suite de tests (11 modules) — python python/tests/run_tests.py
+│   └── tests/             suite de tests (13 modules) — python python/tests/run_tests.py
 ├── backend/main.py        API FastAPI + pages login/setup
+├── backend/routes/licence.py  routes de l'offre et de l'abonnement
 ├── frontend/              tableau de bord (PWA installable)
 ├── android/               application Android native (WebView)
 ├── tools/
@@ -236,6 +304,7 @@ d'environnement de l'hébergeur — sans toucher une ligne de code.
 ├── build_exe.bat          compile l'application seule
 ├── runtime/               moteurs embarqués (généré, non versionné)
 ├── dist/                  sortie du build (application + installateur/)
+├── RELEASE_NOTES_TRIAL.md note de version de l'essai (limites appliquées)
 ├── VERSION                numéro de version — source unique
 ├── agence.spec            build PyInstaller (exe Windows)
 └── server.py              point d'entrée serveur (Railway/Render/local)
@@ -514,8 +583,13 @@ un tableau de bord par ailleurs fonctionnel. Même principe pour
 `/api/auto-trader/{status,start,stop}` `/api/mt5/*` `/api/risk/*`
 `/api/ia/{statut,moteur}` `/api/ollama/*` `/api/hermes/*` `/api/diagnostic`
 `/api/backtest` `/api/performance[/reel]` `/api/mt5/trades`
-`/api/notifications/*` `/api/rapport/test` `/api/mise-a-jour` —
+`/api/notifications/*` `/api/rapport/test` `/api/mise-a-jour`
+`/api/licence[/offre,/activer,/rafraichir,/desactiver]` —
 documentation interactive sur `/docs` (après connexion).
+
+Les routes réservées à l'abonnement répondent **402** avec le corps
+`{"pro_requis": true, "feature": …, "store_url": …}` ; un quota d'essai
+atteint répond **429**, même corps. L'interface n'a qu'un cas à traiter.
 
 ## Tests
 

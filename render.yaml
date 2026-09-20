@@ -9,7 +9,19 @@ services:
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
-      - key: ANTHROPIC_API_KEY
+      # ANTHROPIC_API_KEY retirée : le mode IA distant n'existe plus (les deux
+      # moteurs sont locaux, cf. python/config.py), et app_config EFFACE cette
+      # clé du disque au démarrage. La laisser déclarée ici n'activait rien —
+      # elle invitait seulement à coller une vraie clé dans l'environnement
+      # d'un service web public, pour une fonctionnalité absente.
+      #
+      # Clé PUBLIQUE de l'émetteur de licences : aucune valeur secrète, elle
+      # ne permet QUE de vérifier une signature (cf. licence/verification.py).
+      - key: AGENCE_LICENCE_PUBKEY
+        sync: false
+      # Émetteur de licences (HTTPS obligatoire). Ni clé ni jeton : seule
+      # l'URL du service.
+      - key: LICENCE_API_URL
         sync: false
       - key: CAPITAL_INITIAL
         value: "100000"

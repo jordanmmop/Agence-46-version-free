@@ -194,6 +194,56 @@ async def _auth_middleware(request: Request, call_next):
     from urllib.parse import quote
     return RedirectResponse(url=f"/login?next={quote(path)}", status_code=302)
 
+# ═══════════════════════════ LICENCE / ABONNEMENT ══════════════════════════
+# Toutes les restrictions de la version d'essai passent par `licence.gate`
+# (cf. python/licence/) : les routes ci-dessous ne décident de rien, elles
+# appellent la porte et traduisent son refus en réponse HTTP. Une seule
+# forme de refus, la même pour tout le monde — l'interface n'a qu'un cas à
+# gérer, et aucune restriction ne peut diverger d'un endroit à l'autre.
+try:
+    from backend.routes.licence import router as _licence_router
+except ImportError:                     # exécution directe « python backend/main.py »
+    from routes.licence import router as _licence_router
+
+app.include_router(_licence_router)
+
+
+from licence.gate import ProRequis, QuotaDepasse
+
+
+@app.exception_handler(ProRequis)
+async def _handler_pro_requis(request: Request, exc: ProRequis):
+    """402 Payment Required : la fonctionnalité existe, elle est verrouillée.
+
+    402 et non 403 : il ne s'agit pas d'un droit refusé mais d'une offre à
+    souscrire — l'interface affiche là-dessus « Passer à Pro » plutôt qu'une
+    erreur d'autorisation.
+
+    Traiter le refus par un gestionnaire d'exception plutôt que route par
+    route a une conséquence qui compte : une garde posée AU FOND de la pile
+    (dans un agent, dans l'orchestrateur) remonte jusqu'ici avec le même
+    corps de réponse, sans que la route intermédiaire ait à s'en occuper.
+    """
+    return JSONResponse(status_code=402, content=exc.payload())
+
+
+@app.exception_handler(QuotaDepasse)
+async def _handler_quota(request: Request, exc: QuotaDepasse):
+    """429 Too Many Requests : la limite d'essai est atteinte, elle se libère
+    d'elle-même (fenêtre glissante d'une heure ou de 24 h)."""
+    return JSONResponse(status_code=429, content=exc.payload())
+
+
+def _exiger_pro(feature: str, detail: str = "") -> None:
+    """Garde d'une route Pro : laisse passer, ou lève `ProRequis` (→ 402).
+
+    Passe par `licence.gate.exiger` : `licence/config.py` reste la seule
+    source de vérité sur ce qui est Pro et ce qui ne l'est pas.
+    """
+    from licence import gate
+    gate.exiger(feature, detail)
+
+
 _orchestrateur = None
 _derniere_analyse = None
 _lock = Lock()
@@ -531,6 +581,16 @@ async def status():
         reponse["auth"] = auth_active()
     except Exception:
         reponse["auth"] = False
+    # Offre en cours (essai / Pro), agents débloqués et quotas restants :
+    # l'interface s'en sert pour son badge, son compteur de requêtes et ses
+    # cadenas. Isolé comme le reste : une licence illisible ne doit pas priver
+    # l'utilisateur de son tableau de bord.
+    try:
+        from licence import gate
+        reponse["licence"] = gate.etat_public(TOUS_LES_AGENTS)
+    except Exception as e:
+        logger.error(f"/api/status : licence indisponible ({e})", exc_info=True)
+        reponse["licence"] = None
     try:
         reponse["orchestrateur"] = get_orchestrateur().to_dict()
     except Exception as e:
@@ -572,15 +632,28 @@ async def lister_assistants():
 async def lister_agents():
     try:
         from agents import TOUS_LES_AGENTS, AGENTS_PAR_GROUPE
+        from licence import gate
         chef = get_orchestrateur()
+
+        # Les agents verrouillés restent LISTÉS — c'est voulu : la version
+        # d'essai doit laisser découvrir l'étendue de l'offre Pro. Ils portent
+        # simplement un drapeau que l'interface traduit en cadenas.
+        autorises = set(gate.ids_agents_autorises(TOUS_LES_AGENTS))
+
+        def _decrire(agent):
+            d = agent.to_dict()
+            d["verrouille"] = d.get("id") not in autorises
+            return d
+
         return {
             "orchestrateur": chef.to_dict(),
-            "agents": [a.to_dict() for a in TOUS_LES_AGENTS],
+            "agents": [_decrire(a) for a in TOUS_LES_AGENTS],
             "par_groupe": {
-                groupe: [a.to_dict() for a in agents]
+                groupe: [_decrire(a) for a in agents]
                 for groupe, agents in AGENTS_PAR_GROUPE.items()
             },
             "total": len(TOUS_LES_AGENTS) + 1,
+            "licence": gate.etat_public(TOUS_LES_AGENTS),
         }
     except Exception as e:
         logger.error(f"Erreur /api/agents : {e}")
@@ -596,7 +669,18 @@ async def agent_detail(agent_id: str):
     agent = AGENTS_PAR_ID.get(agent_id)
     if not agent:
         raise HTTPException(404, f"Agent {agent_id} non trouvé")
-    return agent.to_dict()
+    detail = agent.to_dict()
+    # Consultable même verrouillé (découverte de l'offre), mais l'interface
+    # doit pouvoir afficher « nécessite la version Pro » à la sélection.
+    try:
+        from agents import TOUS_LES_AGENTS
+        from licence import gate
+        detail["verrouille"] = gate.agent_verrouille(agent_id, TOUS_LES_AGENTS)
+        if detail["verrouille"]:
+            detail["message_pro"] = ("Cet agent est disponible dans la version Pro.")
+    except Exception:
+        detail["verrouille"] = False
+    return detail
 
 
 @app.post("/api/analyser")
@@ -622,9 +706,22 @@ async def lancer_analyse(
 
     symboles_a_analyser = normaliser_symboles(symboles) or list(SYMBOLES_DEFAULT[:3])
 
+    # GARDE LICENCE — avant tout effet : consomme une requête du quota d'essai
+    # et ramène la demande au périmètre de l'offre. Lève QuotaDepasse (→ 429)
+    # si la limite journalière ou horaire est atteinte.
+    from licence import gate
+    autorisation = gate.autoriser_analyse(symboles_a_analyser)
+    symboles_a_analyser = autorisation["symboles"] or list(SYMBOLES_DEFAULT[:1])
+    _licence_info = {"quotas": autorisation["quotas"],
+                     "symboles_ecartes": autorisation["symboles_ecartes"]}
+
     if async_mode:
+        # Analyse en arrière-plan = tâche longue : réservée à l'abonnement Pro.
+        _exiger_pro("taches_arriere_plan",
+                    "L'analyse en arrière-plan est une fonctionnalité Pro.")
         background_tasks.add_task(_analyser_async, symboles_a_analyser)
-        return {"message": "Analyse lancée en arrière-plan", "symboles": symboles_a_analyser}
+        return {"message": "Analyse lancée en arrière-plan",
+                "symboles": symboles_a_analyser, "licence": _licence_info}
 
     chef = get_orchestrateur()
     try:
@@ -654,6 +751,12 @@ async def lancer_analyse(
     # sérialisé. Cela évite : (1) qu'un simple clic sur « Analyser » ouvre des
     # positions réelles à l'insu de l'utilisateur, (2) deux chemins d'ordres
     # concurrents (course, positions dupliquées) entre l'endpoint et la boucle.
+    #
+    # `licence` accompagne CHAQUE rapport : c'est ce qui permet à l'interface
+    # d'afficher « 18 / 20 requêtes utilisées aujourd'hui » et de nommer les
+    # symboles écartés, sans un aller-retour supplémentaire.
+    if isinstance(rapport, dict):
+        rapport["licence"] = _licence_info
     return rapport
 
 
@@ -795,6 +898,11 @@ async def comptes_liste():
 
 @app.post("/api/comptes/basculer")
 async def comptes_basculer(body: Dict[str, Any] = Body(...)):
+    # Gestion de PLUSIEURS comptes courtier = administration avancée (Pro).
+    # Lister et supprimer restent ouverts en essai : voir ses identifiants
+    # enregistrés et pouvoir les effacer ne se monnaie pas.
+    _exiger_pro("administration_avancee",
+                "La gestion de plusieurs comptes est réservée à la version Pro.")
     from utils import comptes
     cid = str(body.get("id", "")).strip()
     if not cid:
@@ -806,6 +914,8 @@ async def comptes_basculer(body: Dict[str, Any] = Body(...)):
 
 @app.post("/api/comptes/renommer")
 async def comptes_renommer(body: Dict[str, Any] = Body(...)):
+    _exiger_pro("administration_avancee",
+                "La gestion de plusieurs comptes est réservée à la version Pro.")
     from utils import comptes
     cid = str(body.get("id", "")).strip()
     return comptes.renommer(cid, body.get("label", ""))
@@ -972,6 +1082,11 @@ def mt5_launch():
 async def mt5_auto_trading(body: Dict[str, Any] = Body(...)):
     from utils.mt5_manager import get_mt5_manager
     active = bool(body.get("active", False))
+    # Seule l'ACTIVATION est gardée : désactiver doit rester possible en
+    # toutes circonstances, y compris quand un abonnement vient d'expirer.
+    if active:
+        _exiger_pro("automatisations",
+                    "L'activation du trading automatique est une fonctionnalité Pro.")
     return get_mt5_manager().set_auto_trading(active)
 
 
@@ -1130,6 +1245,8 @@ def performance_reel(jours: int = 30):
 @app.post("/api/rapport/test")
 def rapport_test():
     """Génère et envoie le rapport quotidien immédiatement (test)."""
+    _exiger_pro("workflows_avances",
+                "Les rapports automatiques sont une fonctionnalité Pro.")
     from utils.auto_trader import construire_rapport_quotidien
     from utils.notifier import notifier, get_webhook
     jour = datetime.now().strftime("%Y-%m-%d")
@@ -1146,6 +1263,8 @@ def rapport_test():
 @app.post("/api/backtest")
 async def backtest(body: Dict[str, Any] = Body(default={})):
     """Rejoue une stratégie technique sur l'historique d'un symbole."""
+    # Workflow avancé (téléchargement d'historique + rejeu complet) : Pro.
+    _exiger_pro("workflows_avances", "Le backtest est une fonctionnalité Pro.")
     from utils.backtest import lancer_backtest
     symbole = str(body.get("symbole", "BTC-USD")).strip() or "BTC-USD"
     timeframe = str(body.get("timeframe", "1d")).strip() or "1d"
@@ -1205,6 +1324,8 @@ async def risk_status():
 
 @app.post("/api/risk/config")
 async def risk_config(body: Dict[str, Any] = Body(...)):
+    _exiger_pro("parametres_avances",
+                "Les plafonds de sécurité avancés sont réservés à la version Pro.")
     from utils.risk_guard import get_risk_guard
     return get_risk_guard().configurer(body)
 
@@ -1221,6 +1342,10 @@ async def trading_config_get():
 @app.post("/api/trading/config")
 async def trading_config_set(body: Dict[str, Any] = Body(...)):
     """Applique les réglages saisis dans l'interface (tout ou rien)."""
+    # Paramètres avancés des agents : LECTURE libre (la route GET reste
+    # ouverte, l'essai doit montrer ce que Pro permet de régler), ÉCRITURE Pro.
+    _exiger_pro("parametres_avances",
+                "Les paramètres avancés des agents sont réservés à la version Pro.")
     from utils import trading_config
     return trading_config.configurer(body)
 
@@ -1242,7 +1367,12 @@ async def trading_levier(body: Dict[str, Any] = Body(...)):
                 "levier": trading_config.levier_actuel()}
     # Depuis l'interface, le réglage doit TENIR : on l'enregistre plutôt que
     # de le laisser écraser au prochain cycle par la décision des agents.
+    # Réglage MANUEL du levier = paramètre avancé (Pro). L'ajustement
+    # automatique par les agents, lui, reste libre : il fait partie du
+    # fonctionnement normal d'un cycle, y compris en essai.
     if body.get("source") == "interface":
+        _exiger_pro("parametres_avances",
+                    "Le réglage manuel du levier est réservé à la version Pro.")
         return trading_config.configurer({"levier": demande})
     return {"success": True,
             "levier": trading_config.ajuster_levier(demande, source="agents IA")}
@@ -1265,6 +1395,8 @@ async def preflight(body: Dict[str, Any] = Body(default={})):
     # Même normalisation que les deux autres points d'entrée : sans elle,
     # « BAC » était vérifié comme trois symboles B, A et C — et un nombre
     # levait un TypeError rendu en 500.
+    _exiger_pro("workflows_avances",
+                "La vérification pré-vol est une fonctionnalité Pro.")
     symboles = normaliser_symboles(body.get("symboles")) or None
     return await asyncio.to_thread(verifier, symboles)
 
@@ -1292,6 +1424,13 @@ def auto_trader_status():
 
 @app.post("/api/auto-trader/start")
 async def auto_trader_start(body: Dict[str, Any] = Body(...)):
+    # Le trading automatique est LA fonctionnalité d'automatisation du projet :
+    # une boucle de fond qui analyse et passe des ordres sans intervention.
+    # Réservée à l'abonnement Pro. L'arrêt (/api/auto-trader/stop), lui, n'est
+    # jamais gardé : on doit pouvoir couper une boucle en cours en toutes
+    # circonstances, y compris si la licence vient d'expirer.
+    _exiger_pro("automatisations",
+                "Le trading automatique est une fonctionnalité Pro.")
     from utils.auto_trader import get_auto_trader
     from config import SYMBOLES_DEFAULT
     # Normalisation STRICTE, partagée avec /api/analyser et /api/preflight

@@ -1674,3 +1674,221 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
+
+/* ═══════════════ OFFRE : VERSION D'ESSAI / VERSION PRO ═══════════════
+   Mêmes variables, mêmes rayons, mêmes transitions que le reste du design
+   system « terminal financier » : l'offre s'ajoute à l'interface, elle ne la
+   remplace pas. Un seul accent (--accent) pour Pro, le jaune d'alerte déjà
+   utilisé ailleurs pour l'essai — aucune couleur nouvelle. */
+
+/* ── Badge d'offre et compteur de requêtes (en-tête) ── */
+.licence-chip {
+  cursor: pointer;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  transition: border-color 0.16s var(--ease), color 0.16s var(--ease);
+}
+.licence-chip.is-trial { color: var(--yellow); border-color: rgba(216, 160, 61, 0.35); }
+.licence-chip.is-pro   { color: var(--accent); border-color: rgba(91, 141, 239, 0.4); }
+.licence-chip:hover    { border-color: currentColor; }
+
+#licence-quota { font-size: 0.7rem; }
+#licence-quota.quota-bas { color: var(--yellow); border-color: rgba(216, 160, 61, 0.35); }
+
+/* ── Cadenas sur un agent verrouillé ──
+   L'agent reste LISIBLE : on découvre ce que la version Pro apporte. Il est
+   simplement mis en retrait, et le cadenas dit pourquoi. */
+.agent-card.verrouille {
+  position: relative;
+  cursor: pointer;
+  border-style: dashed;
+  border-color: var(--border);
+}
+.agent-card.verrouille .agent-nom,
+.agent-card.verrouille .agent-desc,
+.agent-card.verrouille .agent-assistant { opacity: 0.48; }
+.agent-card.verrouille:hover { border-color: var(--accent); }
+.agent-lock {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.55rem;
+  font-size: 0.62rem;
+  color: var(--yellow);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+/* ── Bandeau d'offre, en tête de la carte « agents » ── */
+.lic-bandeau {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--surface2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.8rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.lic-bandeau strong { color: var(--text); font-weight: 600; }
+.lic-bandeau .lic-btn { margin-left: auto; }
+
+/* ── Modales de l'offre ── */
+.lic-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(5, 7, 10, 0.78);
+  backdrop-filter: blur(3px);
+  animation: licFade 0.16s var(--ease);
+}
+@keyframes licFade { from { opacity: 0; } to { opacity: 1; } }
+
+.lic-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 560px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  animation: licRise 0.18s var(--ease);
+}
+@keyframes licRise { from { transform: translateY(10px); } to { transform: translateY(0); } }
+
+.lic-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 1rem 1.2rem;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.lic-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: var(--radius-sm);
+}
+.lic-close:hover { color: var(--text); background: var(--surface2); }
+
+.lic-body { padding: 1.2rem; overflow-y: auto; font-size: 0.84rem; line-height: 1.55; }
+.lic-body p { color: var(--text-muted); margin-bottom: 0.7rem; }
+.lic-intro { color: var(--text) !important; }
+.lic-h { font-size: 0.82rem; margin: 1rem 0 0.4rem; color: var(--text); }
+.lic-ul { margin: 0 0 0.8rem 1.1rem; color: var(--text-muted); }
+.lic-ul li { margin-bottom: 0.2rem; }
+.lic-detail { font-size: 0.79rem; }
+.lic-note { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.9rem; }
+
+.lic-feature {
+  background: var(--surface2);
+  border: 1px solid var(--border-soft);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.7rem;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.lic-table { width: 100%; border-collapse: collapse; margin: 0.6rem 0; font-size: 0.78rem; }
+.lic-table th, .lic-table td {
+  text-align: left;
+  padding: 0.42rem 0.5rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+.lic-table th { color: var(--text-muted); font-weight: 500; font-size: 0.72rem; }
+.lic-table td { color: var(--text); }
+.lic-table th:not(:first-child), .lic-table td:not(:first-child) {
+  text-align: center;
+  width: 78px;
+  font-variant-numeric: tabular-nums;
+}
+.lic-table .lic-no  { color: var(--text-muted); }
+.lic-table .lic-yes { color: var(--green); }
+
+.lic-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+
+.lic-btn {
+  border-radius: var(--radius-sm);
+  padding: 0.56rem 0.95rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.16s var(--ease), border-color 0.16s var(--ease);
+  text-decoration: none;
+  display: inline-block;
+  text-align: center;
+}
+.lic-btn-pro { background: var(--accent); color: #fff; }
+.lic-btn-pro:hover { background: #6d9af1; }
+.lic-btn-ghost { background: transparent; border-color: var(--border); color: var(--text); }
+.lic-btn-ghost:hover { border-color: var(--accent); }
+.lic-btn-store { background: var(--surface2); border-color: var(--border); color: var(--text); }
+.lic-btn-store:hover { border-color: var(--accent); }
+
+.lic-store {
+  margin-top: 1.1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+.lic-store-txt { font-size: 0.78rem; color: var(--text-muted); }
+
+.lic-label { display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 0.3rem; }
+.lic-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.lic-input {
+  flex: 1;
+  min-width: 180px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 0.55rem 0.7rem;
+  font-size: 0.8rem;
+  font-family: var(--mono);
+}
+.lic-input:focus { outline: none; border-color: var(--accent); }
+.lic-result { margin-top: 0.6rem; font-size: 0.78rem; color: var(--text-muted); min-height: 1.1em; }
+
+@media (max-width: 720px) {
+  .lic-box { max-height: 92vh; }
+  .lic-body { padding: 1rem; }
+  .lic-actions .lic-btn, .lic-btn-store { width: 100%; }
+  .lic-bandeau .lic-btn { margin-left: 0; width: 100%; }
+  .lic-table th:not(:first-child), .lic-table td:not(:first-child) { width: 56px; }
+}
+
+/* ── Offre sur l'écran de lancement ── */
+.launch-licence {
+  margin-top: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+.launch-licence .lic-btn { padding: 0.45rem 0.85rem; font-size: 0.75rem; }
+.launch-licence .launch-lic-titre { color: var(--text); font-weight: 600; }
+.launch-licence a { color: var(--accent); text-decoration: none; }
+.launch-licence a:hover { text-decoration: underline; }

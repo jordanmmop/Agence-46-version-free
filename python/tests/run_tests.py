@@ -15,13 +15,15 @@ import test_performance
 import test_moteur_ia
 import test_installation
 import test_msix
+import test_licence
 
 
 def main():
     modules = [test_risk_guard, test_mt5_execution, test_agents,
                test_backtest, test_trading_reel, test_market_hours,
                test_indicators, test_features, test_performance,
-               test_moteur_ia, test_installation, test_msix]
+               test_moteur_ia, test_installation, test_msix,
+               test_licence]
     echecs = 0
     for mod in modules:
         try:

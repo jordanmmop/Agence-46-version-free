@@ -262,6 +262,25 @@
         </div>
 
         <div class="tools-section">
+          <h3>★ Offre &amp; abonnement</h3>
+          <p class="tools-hint">Version en cours, agents débloqués et requêtes restantes.
+          Les limites sont appliquées par le serveur de l'application : cet écran les
+          affiche, il ne les fixe pas.</p>
+          <div id="lic-tools-etat" class="tools-result lignes">Chargement…</div>
+          <div class="tools-row">
+            <button onclick="licencePasserPro()">★ Passer à Pro</button>
+            <button onclick="licenceVoirOffre()">Voir les fonctionnalités Pro</button>
+            <button onclick="licenceEcranEssai()">Version d'essai : ce qui est limité</button>
+          </div>
+          <p class="tools-hint" style="margin-top:12px">Disponible également sur le Microsoft Store</p>
+          <div class="tools-row">
+            <a class="lic-btn lic-btn-store"
+               href="https://apps.microsoft.com/detail/9nltgfr2btsp?hl=fr-FR&amp;gl=FR"
+               target="_blank" rel="noopener noreferrer">Télécharger sur le Microsoft Store</a>
+          </div>
+        </div>
+
+        <div class="tools-section">
           <h3>🔒 Sécurité</h3>
           <div id="sec-avec-code" style="display:none">
             <div class="tools-row">
@@ -281,12 +300,35 @@
     const selMoteur = document.getElementById('ia-moteur');
     if (selMoteur) selMoteur.onchange = () => toolsIaRemplirModeles(selMoteur.value, '');
     toolsLoadSecurite();
+    toolsLoadLicence();
     toolsLoadWebhook();
     toolsIaCharger();
     toolsMt5Check();
     toolsLoadComptes();
     toolsLoadTrading();
     toolsLoadRisk();
+  }
+
+  // ── Offre & abonnement ─────────────────────────────────────────
+  async function toolsLoadLicence() {
+    const el = document.getElementById('lic-tools-etat');
+    if (!el) return;
+    const d = await jf('/api/licence');
+    if (!d) { el.textContent = 'État de l\'offre indisponible.'; return; }
+    if (typeof window.licenceAppliquer === 'function') window.licenceAppliquer(d);
+    const a = d.agents || {}, q = d.quotas || {};
+    const lignes = [
+      `Offre : ${d.libelle || d.etat}`,
+      `Agents IA : ${a.autorises} / ${a.total}`,
+      `Requêtes : ${q.illimite ? 'illimitées' : q.resume}`,
+    ];
+    if (!q.illimite && q.heure_limite != null) {
+      lignes.push(`Cette heure-ci : ${q.heure_utilise} / ${q.heure_limite}`);
+    }
+    if (d.expire_le) {
+      lignes.push(`Abonnement valable jusqu'au ${new Date(d.expire_le * 1000).toLocaleDateString('fr')}`);
+    }
+    el.innerHTML = lignes.map(l => esc(l)).join('<br>');
   }
 
   // ── Moteur de performance ──────────────────────────────────────

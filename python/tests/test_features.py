@@ -1301,7 +1301,13 @@ def test_matieres_premieres_tradables():
 
     # 5. L'API les expose, et l'interface construit bien une chip pour eux.
     from backend.main import app
-    routes = {r.path for r in app.routes}
+    # getattr : `app.routes` ne contient pas que des routes déclarées ici —
+    # il y a les montages de fichiers statiques, et depuis FastAPI 0.141 les
+    # routeurs inclus (licence/abonnement) y figurent comme un objet différé
+    # SANS attribut `path`. Un `r.path` nu faisait échouer ce test sur une
+    # simple montée de version, pour une raison sans rapport avec les
+    # matières premières qu'il vérifie.
+    routes = {getattr(r, "path", "") for r in app.routes}
     assert "/api/symboles" in routes
     src = (Path(__file__).resolve().parents[2] / "backend" / "main.py").read_text(encoding="utf-8")
     assert '"matieres": SYMBOLES_MATIERES' in src, (
