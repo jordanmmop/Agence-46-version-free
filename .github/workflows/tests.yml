@@ -1,0 +1,49 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "python/**"
+      - "backend/**"
+      # frontend/ inclus : la suite vérifie aussi l'échappement HTML du
+      # tableau de bord. Sans ce chemin, une régression XSS introduite
+      # uniquement côté JS ne déclencherait aucun test.
+      - "frontend/**"
+      # tools/ : preparer_runtimes.py décide de ce qui est embarqué dans
+      # l'exe, et la suite vérifie la détection de ces runtimes.
+      - "tools/**"
+      # Empaquetage Windows : test_installation.py vérifie le script
+      # d'installation, la source unique de version et les chemins de données
+      # après installation. Sans ces chemins, casser l'installeur ne
+      # déclencherait aucun test.
+      - "installer/**"
+      - "scripts/**"
+      # Empaquetage MSIX : test_msix.py vérifie le manifeste, les icônes, les
+      # scripts PowerShell et le pipeline de publication. Sans ces chemins,
+      # casser la chaîne Microsoft Store ne déclencherait aucun test.
+      - "packaging/**"
+      - ".github/workflows/windows-msix.yml"
+      - "agence.spec"
+      - "app_window.py"
+      - "VERSION"
+      - ".github/workflows/tests.yml"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r python/requirements.txt
+      - name: Run test suite
+        run: python python/tests/run_tests.py

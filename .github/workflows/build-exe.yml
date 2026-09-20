@@ -1,0 +1,138 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "python/**"
+      - "frontend/**"
+      - "server.py"
+      - "agence.spec"
+      - "tools/**"
+      - "installer/**"
+      - "scripts/**"
+      - "VERSION"
+      - "app_window.py"
+      - ".github/workflows/build-exe.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r python/requirements.txt -r backend/requirements.txt
+          # pywebview : indispensable a la FENETRE native (app_window.py). Sans
+          # lui, l'exe est construit avec console=False ET sans interface :
+          # double-clic = processus fantome invisible. build_exe.bat l'installe
+          # deja en local, la CI doit faire pareil.
+          pip install pyinstaller pywebview
+          # Pillow : uniquement pour regenerer l'icone si elle manquait. Elle
+          # est versionnee, donc c'est une precaution, pas une dependance.
+          pip install pillow
+
+      # NOTE : la CI construit un exe ALLEGE, sans tools/preparer_runtimes.py.
+      # Embarquer Ollama, Hermes et leurs modeles represente 5 a 10 Go : au-dela
+      # du disque et du temps d'un runner GitHub, et au-dela de la limite de
+      # taille des artefacts et des releases. Cet exe telechargera donc ses
+      # moteurs au premier lancement (comportement historique).
+      # Pour l'exe "tout embarque", compilez en local avec build_exe.bat.
+      - name: Build executable (sans runtimes embarques)
+        run: |
+          pyinstaller agence.spec --noconfirm --clean
+
+      # L'exe doit DEMARRER, pas seulement se compiler : un import manquant
+      # dans le bundle (hiddenimports oublie, donnee non embarquee) produit un
+      # binaire parfaitement valide qui meurt au lancement, et personne ne s'en
+      # apercoit avant l'utilisateur. On lance donc le serveur seul
+      # (--serveur-interne, sans fenetre) et on interroge /api/health.
+      - name: Smoke test — l'application demarre et repond
+        shell: pwsh
+        run: |
+          $env:AGENCE_PORT = "8877"
+          $p = Start-Process -PassThru -FilePath "dist\AgenceNumerique\AgenceNumerique.exe" `
+                             -ArgumentList "--serveur-interne"
+          $ok = $false
+          foreach ($i in 1..30) {
+            Start-Sleep -Seconds 5
+            try {
+              $r = Invoke-RestMethod -Uri "http://127.0.0.1:8877/api/health" -TimeoutSec 5
+              if ($r.statut -eq "ok") {
+                Write-Host "[OK] version servie : $($r.version)"
+                if ($r.version -ne (Get-Content VERSION -Raw).Trim()) {
+                  throw "version servie ($($r.version)) differente du fichier VERSION"
+                }
+                $ok = $true
+                break
+              }
+            } catch { }
+          }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok) {
+            Get-Content "$env:USERPROFILE\.agence_financiere\serveur.log" -Tail 40 -ErrorAction SilentlyContinue
+            throw "l'application compilee n'a pas repondu sur /api/health"
+          }
+
+      # ── Installeur Windows ────────────────────────────────────────────────
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Prepare installer resources (icone + amorceur WebView2)
+        run: python tools/preparer_installeur.py
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          # Inno Setup 7 (ce que choco installe aujourd'hui) ou 6 : les deux
+          # compilent le script. Le runner peut avoir l'une ou l'autre.
+          $iscc = @(
+            "${env:ProgramFiles}\Inno Setup 7\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "ISCC.exe introuvable apres l'installation d'Inno Setup" }
+          Write-Host "compilateur : $iscc"
+          & $iscc "installer\agence.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC a echoue (code $LASTEXITCODE)" }
+          Get-ChildItem dist\installateur
+
+      - name: Create ZIP archive
+        run: |
+          Compress-Archive -Path dist/AgenceNumerique -DestinationPath AgenceNumerique-Windows.zip
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgenceNumerique-Windows
+          path: AgenceNumerique-Windows.zip
+          retention-days: 30
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgenceNumerique-Setup
+          path: dist/installateur/*
+          retention-days: 30
+
+      - name: Upload to Release (if tagged)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            AgenceNumerique-Windows.zip
+            dist/installateur/*

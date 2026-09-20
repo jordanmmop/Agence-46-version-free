@@ -1,0 +1,23 @@
+# Fins de ligne des scripts Windows.
+#
+# cmd.exe exige des fins de ligne CRLF : sur un fichier en LF (ce que produit
+# n'importe quel outil Unix, et ce que contenait ce depot), l'analyseur casse
+# sur les blocs "if (...)" multi-ligne et sur les etiquettes "goto". La fenetre
+# se ferme alors instantanement, AVANT d'avoir affiche quoi que ce soit -
+# impossible a diagnostiquer pour qui double-clique sur le script.
+#
+# Ces regles garantissent la conversion a chaque extraction du depot, quelle
+# que soit la machine et la configuration git de celui qui clone.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+*.iss   text eol=crlf
+
+# Scripts Unix : toujours en LF, meme sur une machine Windows.
+*.sh    text eol=lf
+
+# Binaires : jamais de conversion (elle corromprait le fichier).
+*.ico   binary
+*.png   binary
+*.jar   binary
+*.gguf  binary

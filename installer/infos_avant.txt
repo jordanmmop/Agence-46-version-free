@@ -1,0 +1,37 @@
+﻿Agence Numérique Financière
+===========================================================================
+
+AVERTISSEMENT IMPORTANT — RISQUE FINANCIER
+
+Ce logiciel peut analyser les marchés ET PASSER DES ORDRES RÉELS sur votre
+compte de courtage AvaTrade / MetaTrader 5.
+
+  •  Le trading comporte un risque réel de perte en capital.
+  •  Aucun système, intelligence artificielle comprise, ne garantit un gain.
+  •  Commencez TOUJOURS sur un compte de DÉMONSTRATION, avec les protections
+     activées par défaut.
+  •  Vous restez seul responsable des ordres passés depuis votre compte.
+
+En poursuivant l'installation, vous reconnaissez avoir pris connaissance de
+cet avertissement.
+
+---------------------------------------------------------------------------
+
+CE QUI VA ÊTRE INSTALLÉ
+
+  •  L'application et son interface (46 agents IA de trading).
+  •  Tout ce dont elle a besoin pour fonctionner : Python et l'ensemble des
+     bibliothèques sont DÉJÀ inclus. Vous n'avez rien d'autre à installer.
+  •  Selon la version téléchargée, les moteurs d'IA locaux (Ollama, Hermès)
+     et un terminal MetaTrader 5 portable peuvent être inclus. Sinon,
+     l'application les téléchargera au premier usage.
+
+L'installation se fait dans votre profil utilisateur : aucun droit
+administrateur n'est demandé. Vous pouvez changer le dossier à l'étape
+suivante.
+
+VIE PRIVÉE
+
+L'intelligence artificielle tourne SUR VOTRE MACHINE. Aucune clé API, aucun
+abonnement, aucun compte à créer. Les seules connexions sortantes sont les
+cours de marché et votre courtier.

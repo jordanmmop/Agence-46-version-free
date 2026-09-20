@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: agence-numerique-financiere
+    env: python
+    region: frankfurt
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r python/requirements.txt -r backend/requirements.txt
+    startCommand: python server.py
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CAPITAL_INITIAL
+        value: "100000"
+      - key: BACKEND_HOST
+        value: "0.0.0.0"
+      - key: PYTHONPATH
+        value: "python:."

@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  GABARIT du manifeste MSIX — Agence Numérique Financière
+  ======================================================
+
+  Ce fichier N'EST PAS empaqueté tel quel : `scripts/build-msix.ps1` remplace
+  les jetons {{...}} par les valeurs de `msix.config.json` (elles-mêmes
+  surchargeables par variables d'environnement) et écrit le résultat dans
+  `dist/msix/layout/AppxManifest.xml`.
+
+  Pourquoi un gabarit plutôt qu'un manifeste figé : trois champs — Version,
+  Identity Name et Publisher — DOIVENT changer entre un essai local et une
+  soumission au Microsoft Store, et deux d'entre eux ne sont connus qu'après
+  la réservation du nom dans Partner Center. Les recopier à la main à chaque
+  publication est le moyen le plus sûr de livrer un paquet signé avec une
+  identité qui ne correspond pas au compte — le Store le refuse alors sans
+  expliquer lequel des deux est en cause.
+
+  ┌─ VALEURS PROVISOIRES (développement) ─────────────────────────────────┐
+  │ Identity Name  et  Publisher  valent aujourd'hui des valeurs de TEST.  │
+  │ Elles permettent de compiler, signer et installer localement ; elles   │
+  │ ne permettent PAS de publier. Remplacez-les par celles de Partner      │
+  │ Center — voir « Identité » dans msix.config.json et la section M de    │
+  │ WINDOWS-MSIX.md.                                                       │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  À propos de ResourceId : cet attribut n'existe QUE dans les paquets de
+  ressources d'un .msixbundle (une langue, une échelle d'affichage par
+  paquet). Nous livrons un paquet unique x64 dont les libellés sont écrits en
+  clair dans ce manifeste : il n'y a donc ni ResourceId, ni resources.pri, et
+  c'est volontaire (voir la section « Multi-architecture » de WINDOWS-MSIX.md).
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+
+  <!-- Name et Publisher : imposés par Partner Center pour une publication.
+       Publisher doit être IDENTIQUE au sujet du certificat de signature,
+       caractère pour caractère — c'est la cause n°1 d'un « signature
+       invalide » à l'installation. Version : a.b.c.d, où d (révision) est
+       RÉSERVÉ au Microsoft Store et doit rester 0 dans un paquet soumis. -->
+  <Identity
+    Name="{{IDENTITY_NAME}}"
+    Publisher="{{PUBLISHER}}"
+    Version="{{VERSION}}"
+    ProcessorArchitecture="{{ARCHITECTURE}}" />
+
+  <Properties>
+    <DisplayName>{{DISPLAY_NAME}}</DisplayName>
+    <PublisherDisplayName>{{PUBLISHER_DISPLAY_NAME}}</PublisherDisplayName>
+    <Description>{{DESCRIPTION}}</Description>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <!-- 10.0.17763.0 (Windows 10 1809) : première version où un paquet MSIX
+         contenant une application Win32 plein-trust s'installe sans
+         composant supplémentaire. En exiger moins ferait échouer
+         l'installation après coup, au lieu de l'annoncer. -->
+    <TargetDeviceFamily
+      Name="Windows.Desktop"
+      MinVersion="{{MIN_WINDOWS_VERSION}}"
+      MaxVersionTested="{{MAX_VERSION_TESTED}}" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="fr-FR" />
+    <Resource Language="en-US" />
+  </Resources>
+
+  <Applications>
+    <!-- EntryPoint="Windows.FullTrustApplication" : l'application est un
+         exécutable Win32 classique (produit par PyInstaller), pas une
+         application UWP. C'est ce qui lui laisse l'accès au disque, aux
+         sockets et aux processus enfants dont elle a besoin — le serveur
+         FastAPI tourne dans un processus séparé (voir app_window.py). -->
+    <Application
+      Id="{{APPLICATION_ID}}"
+      Executable="{{EXECUTABLE}}"
+      EntryPoint="Windows.FullTrustApplication">
+
+      <uap:VisualElements
+        DisplayName="{{DISPLAY_NAME}}"
+        Description="{{DESCRIPTION}}"
+        BackgroundColor="{{BACKGROUND_COLOR}}"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+
+        <uap:DefaultTile
+          ShortName="{{SHORT_NAME}}"
+          Square71x71Logo="Assets\Square71x71Logo.png"
+          Square310x310Logo="Assets\Square310x310Logo.png"
+          Wide310x150Logo="Assets\Wide310x150Logo.png">
+          <uap:ShowNameOnTiles>
+            <uap:ShowOn Tile="square150x150Logo" />
+            <uap:ShowOn Tile="wide310x150Logo" />
+          </uap:ShowNameOnTiles>
+        </uap:DefaultTile>
+
+        <!-- Écran affiché par Windows PENDANT l'activation, avant que le
+             processus ne soit prêt. Il ne remplace pas l'écran de chargement
+             de l'application (app_window.py) : il couvre les secondes qui
+             précèdent, où l'utilisateur ne verrait rien du tout. -->
+        <uap:SplashScreen
+          Image="Assets\SplashScreen.png"
+          BackgroundColor="{{BACKGROUND_COLOR}}" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- runFullTrust : capacité RESTREINTE, obligatoire pour toute
+         application Win32 empaquetée. Elle est accordée couramment aux
+         applications de bureau, mais elle déclenche une revue manuelle lors
+         de la soumission au Store : il faut en justifier l'usage (ici :
+         exécutable Python natif, serveur local, pilotage du terminal
+         MetaTrader 5). -->
+    <rescap:Capability Name="runFullTrust" />
+
+    <!-- internetClient : cours de marché (yfinance) et manifeste de mise à
+         jour. internetClientServer + privateNetworkClientServer : le serveur
+         local écoute sur 0.0.0.0 pour que l'application soit aussi
+         consultable depuis un téléphone du même Wi-Fi (voir README, « Sur
+         téléphone »). Aucune autre capacité n'est demandée — chaque capacité
+         superflue allonge la revue du Store et inquiète l'utilisateur. -->
+    <Capability Name="internetClient" />
+    <Capability Name="internetClientServer" />
+    <Capability Name="privateNetworkClientServer" />
+  </Capabilities>
+</Package>

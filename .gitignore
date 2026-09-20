@@ -1,0 +1,82 @@
+# Node dependencies
+node_modules/
+
+# Build and generated output
+dist/
+build/
+dev-dist/
+
+# Runtimes embarqués au build (Ollama, Hermès, MetaTrader 5) : plusieurs Go
+# de binaires et de modèles, reconstruits par tools/preparer_runtimes.py.
+runtime/
+
+# Redistribuable Microsoft téléchargé au build (amorceur WebView2) : binaire
+# tiers, récupéré par tools/preparer_installeur.py. L'icône, elle, est
+# versionnée — la compilation ne doit pas dépendre de Pillow.
+installer/redist/
+
+# Logs
+*.log
+backend/logs/
+
+# Environment files
+.env
+*.env
+backend/.env
+frontend/.env
+python/.env
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local and secret files
+.claude/
+
+# Certificats et cles privees — signature MSIX, signature de code.
+#
+# dist/ est deja ignore, et c'est bien la que create-test-certificate.ps1
+# ecrit le certificat de test : ces motifs sont une SECONDE barriere,
+# volontairement redondante. Une cle privee ajoutee par megarde (« git add -A »
+# depuis un autre dossier, copie temporaire a la racine) ne se retire pas de
+# l'historique d'un depot public — il faut revoquer le certificat.
+#
+# Les certificats PUBLICS (.cer, .crt) ne sont PAS ignores : ils ne
+# contiennent aucun secret et doivent pouvoir accompagner une release pour
+# qu'un utilisateur puisse approuver un paquet signe hors Store.
+*.pfx
+*.p12
+*.key
+*.pem
+*.snk
+
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Base de données locale
+python/data/
+*.db
+*.sqlite
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Android
+android/.gradle/
+android/local.properties
+android/.idea/
+android/app/release/
+.jdk/
+.android-sdk/

@@ -1,0 +1,10 @@
+[build]
+builder = "nixpacks"
+buildCommand = "pip install --upgrade pip && pip install -r python/requirements.txt -r backend/requirements.txt"
+
+[deploy]
+startCommand = "python server.py"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 60
+restartPolicyType = "always"
+restartPolicyMaxRetries = 10

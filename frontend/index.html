@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Agence Numérique Financière | Plateforme IA</title>
+
+<!-- Favicon (logo officiel) -->
+<link rel="icon" type="image/png" href="/icons/favicon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+
+<!-- PWA manifest -->
+<link rel="manifest" href="/manifest.json">
+
+<!-- iOS PWA -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Agence IA">
+<link rel="apple-touch-icon" href="/icons/icon-180.png">
+<link rel="apple-touch-icon" sizes="57x57"   href="/icons/icon-57.png">
+<link rel="apple-touch-icon" sizes="60x60"   href="/icons/icon-60.png">
+<link rel="apple-touch-icon" sizes="72x72"   href="/icons/icon-72.png">
+<link rel="apple-touch-icon" sizes="76x76"   href="/icons/icon-76.png">
+<link rel="apple-touch-icon" sizes="114x114" href="/icons/icon-114.png">
+<link rel="apple-touch-icon" sizes="120x120" href="/icons/icon-120.png">
+<link rel="apple-touch-icon" sizes="144x144" href="/icons/icon-144.png">
+<link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png">
+<link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-167.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png">
+
+<!-- Couleur barre iOS/Android -->
+<meta name="theme-color" content="#0a0c10">
+<meta name="msapplication-TileColor" content="#0a0c10">
+<meta name="msapplication-TileImage" content="/icons/icon-144.png">
+
+<!-- SEO / partage -->
+<meta name="description" content="46 Agents IA de Trading — Analyse, signaux et ordres automatiques AvaTrade MT5">
+
+<link rel="stylesheet" href="css/style.css">
+
+<!-- Service Worker -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () =>
+      navigator.serviceWorker.register('/sw.js').catch(() => {})
+    );
+  }
+</script>
+</head>
+<body>
+
+<!-- ===================== ÉCRAN DE LANCEMENT ===================== -->
+<div id="launch-screen" class="launch-screen">
+  <div class="launch-bg">
+    <div class="launch-grid"></div>
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div class="launch-content">
+    <div class="launch-logo-wrap">
+      <div class="logo-pulse-ring"></div>
+      <img class="logo-inner" src="/icons/icon-192.png" alt="Agence Numérique Financière">
+    </div>
+
+    <h1 class="launch-title">
+      <span>Agence Numérique</span>
+      <span class="gradient-text">Financière</span>
+    </h1>
+    <p class="launch-subtitle">Plateforme IA de Trading &bull; 46 Agents Spécialisés</p>
+
+    <div class="launch-status-bar">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="launch-status-msg">Vérification de la connexion...</span>
+    </div>
+
+    <div class="launch-stats-row">
+      <div class="launch-stat">
+        <div class="ls-val">46</div>
+        <div class="ls-lbl">Agents IA</div>
+      </div>
+      <div class="launch-stat">
+        <div class="ls-val">1</div>
+        <div class="ls-lbl">Orchestrateur</div>
+      </div>
+      <div class="launch-stat">
+        <div class="ls-val">22+</div>
+        <div class="ls-lbl">Symboles</div>
+      </div>
+      <div class="launch-stat">
+        <div class="ls-val">IA</div>
+        <div class="ls-lbl">Locale ou Cloud</div>
+      </div>
+    </div>
+
+    <div class="launch-symbols-section">
+      <div class="ls-label">Symboles à analyser (max 5) :</div>
+      <div class="chips-group" id="launch-chips"></div>
+    </div>
+
+    <div class="launch-buttons">
+      <button class="btn-launch" id="btn-launch" onclick="demarrerApp()" disabled>
+        <span id="btn-launch-inner">
+          <span>Lancer l'application</span>
+        </span>
+        <span id="btn-launch-loading" class="btn-hidden">
+          <span class="spinner"></span>
+          <span>Démarrage en cours...</span>
+        </span>
+      </button>
+      <button class="btn-dashboard-only" onclick="allerDashboardDirect()">
+        Accéder au tableau de bord →
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== TABLEAU DE BORD ===================== -->
+<div id="app" class="app-hidden">
+  <header class="header">
+    <div class="header-logo">
+      <button class="btn-home" onclick="retourAccueil()" title="Retour à l'accueil"><img src="/icons/icon-192.png" alt="Accueil"></button>
+      <div>
+        <h1>Agence Numérique Financière</h1>
+        <p>46 Agents IA de Trading &bull; 1 Chef d'Orchestre + 45 Spécialistes</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="btn-avatrade" id="btn-avatrade" onclick="mt5OuvrirModal()" title="Connexion AvaTrade MT5">
+        <span class="avatrade-dot" id="avatrade-dot"></span>
+        <span id="avatrade-label">Connexion AvaTrade</span>
+      </button>
+      <div class="header-stats">
+        <div class="stat-chip" id="statut-chip">⚡ Chargement...</div>
+        <div class="stat-chip" id="agents-chip">46 Agents</div>
+        <div class="stat-chip" id="cycle-chip">Cycle #0</div>
+        <div class="stat-chip chip-refresh" id="refresh-chip" title="Rafraîchissement auto toutes les 30s">
+          <span class="refresh-arc" id="refresh-arc"></span>
+          <span id="refresh-label">—</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div id="progress-bar" class="progress-bar prog-hidden">
+    <div class="progress-fill" id="progress-fill"></div>
+    <span class="progress-label" id="progress-label">Analyse en cours...</span>
+  </div>
+
+  <div class="main-grid">
+    <!-- Portfolio -->
+    <section class="card card-portfolio">
+      <div class="portfolio-header">
+        <h2>Portefeuille</h2>
+        <div class="sparkline-wrap" id="sparkline-wrap" title="Évolution de la valeur du portefeuille"></div>
+      </div>
+
+      <!-- Bouton d'urgence : mise à plat immédiate du compte -->
+      <div class="flat-row">
+        <button class="btn-flat-all" id="btn-fermer-tout" onclick="fermerToutesPositions()">
+          🛑 Fermer toutes les positions
+        </button>
+        <span class="flat-status" id="flat-status"></span>
+      </div>
+
+      <!-- Objectif du jour -->
+      <div class="objectif-box" id="objectif-box">
+        <div class="objectif-head">
+          <span class="objectif-titre">Objectif du jour</span>
+          <span class="objectif-val" id="objectif-val">—</span>
+        </div>
+        <div class="objectif-bar"><div class="objectif-fill" id="objectif-fill"></div></div>
+        <div class="objectif-sub" id="objectif-sub">—</div>
+      </div>
+      <div class="portfolio-grid">
+        <div class="metric">
+          <span class="label">Valeur Totale</span>
+          <span class="value" id="val-totale">—</span>
+        </div>
+        <div class="metric">
+          <span class="label">P&L Total</span>
+          <span class="value" id="pnl-total">—</span>
+        </div>
+        <div class="metric">
+          <span class="label">Capital Dispo</span>
+          <span class="value" id="capital-dispo">—</span>
+        </div>
+        <div class="metric">
+          <span class="label">Positions</span>
+          <span class="value" id="nb-positions">—</span>
+        </div>
+        <div class="metric">
+          <span class="label">Exposition</span>
+          <span class="value" id="exposition">—</span>
+        </div>
+        <div class="metric">
+          <span class="label">Drawdown</span>
+          <span class="value" id="drawdown">—</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Graphique de performance (courbe P&L) -->
+    <section class="card card-performance">
+      <h2>Performance</h2>
+      <div id="perf-chart" class="perf-chart">
+        <p class="perf-empty">Chargement de la courbe…</p>
+      </div>
+    </section>
+
+    <!-- Analyse Controls -->
+    <section class="card card-controls">
+      <h2>Nouvelle analyse</h2>
+      <div class="controls">
+        <div class="symboles-selector">
+          <label>Symboles à analyser :</label>
+          <div class="chips-group" id="symboles-chips"></div>
+        </div>
+        <button class="btn-analyse" id="btn-analyser" onclick="lancerAnalyse()">
+          Analyser avec les 46 agents
+        </button>
+        <div id="analyse-status" class="analyse-status"></div>
+      </div>
+    </section>
+
+    <!-- Chef d'Orchestre -->
+    <section class="card card-orchestrateur">
+      <h2>Chef d'orchestre</h2>
+      <div id="orchestrateur-info" class="orchestrateur-panel">
+        <p class="loading">Chargement...</p>
+      </div>
+    </section>
+
+    <!-- Decisions -->
+    <section class="card card-decisions">
+      <h2>Décisions en cours</h2>
+      <div id="decisions-list" class="decisions-panel">
+        <p class="empty-state">Lancez une analyse pour voir les décisions</p>
+      </div>
+    </section>
+
+    <!-- Agents -->
+    <section class="card card-agents">
+      <h2>Les 46 agents</h2>
+      <div class="groupe-tabs" id="groupe-tabs"></div>
+      <div id="agents-grid" class="agents-grid"></div>
+    </section>
+
+    <!-- Signaux -->
+    <section class="card card-signaux">
+      <h2>Signaux récents</h2>
+      <div id="signaux-feed" class="signaux-feed">
+        <p class="empty-state">Pas encore de signaux</p>
+      </div>
+    </section>
+
+    <!-- Auto-Trader -->
+    <section class="card card-autotrader">
+      <div class="at-header">
+        <div>
+          <h2>Trading automatique</h2>
+          <p class="at-subtitle">Les 46 agents analysent et passent les ordres à votre place</p>
+        </div>
+        <div class="at-status-badge" id="at-badge">INACTIF</div>
+      </div>
+
+      <div class="at-controls">
+        <div class="at-control-group">
+          <label class="at-label">Intervalle d'analyse</label>
+          <div class="at-interval-row">
+            <button class="at-interval-btn active" data-s="30">30s</button>
+            <button class="at-interval-btn" data-s="60">1 min</button>
+            <button class="at-interval-btn" data-s="120">2 min</button>
+            <button class="at-interval-btn" data-s="300">5 min</button>
+          </div>
+        </div>
+        <div class="at-control-group">
+          <label class="at-label">Symboles tradés</label>
+          <div class="chips-group" id="at-symboles-chips"></div>
+        </div>
+      </div>
+
+      <div class="at-btn-row">
+        <button class="at-btn-start" id="at-btn-start" onclick="atDemarrer()">
+          <span class="at-btn-dot"></span>
+          DÉMARRER LE TRADING
+        </button>
+        <button class="at-btn-stop" id="at-btn-stop" onclick="atArreter()" style="display:none">
+          ⏹ ARRÊTER
+        </button>
+      </div>
+
+      <div class="at-live" id="at-live">
+        <div class="at-live-row">
+          <span class="at-live-label">Cycle</span>
+          <span class="at-live-val" id="at-cycle">—</span>
+        </div>
+        <div class="at-live-row">
+          <span class="at-live-label">Dernier run</span>
+          <span class="at-live-val" id="at-last-run">—</span>
+        </div>
+        <div class="at-live-row">
+          <span class="at-live-label">Prochain dans</span>
+          <span class="at-live-val" id="at-countdown">—</span>
+        </div>
+      </div>
+
+      <!-- Positions ouvertes -->
+      <div class="at-positions-section">
+        <h3 class="at-positions-title">Positions ouvertes</h3>
+        <div id="at-positions">
+          <p class="at-empty">Aucune position ouverte</p>
+        </div>
+      </div>
+
+      <!-- Derniers signaux -->
+      <div class="at-signals-section">
+        <h3 class="at-signals-title">Derniers signaux</h3>
+        <div id="at-signals">
+          <p class="at-empty">En attente d'analyse...</p>
+        </div>
+      </div>
+
+      <!-- Journal des ordres passés -->
+      <div class="at-signals-section">
+        <h3 class="at-signals-title">Ordres exécutés</h3>
+        <div id="at-journal">
+          <p class="at-empty">Aucun ordre exécuté</p>
+        </div>
+      </div>
+
+      <!-- Erreurs -->
+      <div id="at-errors" class="at-errors" style="display:none"></div>
+    </section>
+
+    <!-- AvaTrade / MT5 Panel -->
+    <section class="card card-mt5">
+      <div class="mt5-card-header">
+        <h2>AvaTrade · MetaTrader 5</h2>
+        <button class="mt5-connect-btn" onclick="mt5OuvrirModal()">🔐 Connexion AvaTrade</button>
+      </div>
+
+      <!-- Statut + infos compte -->
+      <div id="mt5-panel">
+        <div class="mt5-status-row">
+          <span class="mt5-dot disconnected"></span>
+          <span class="mt5-status-text muted">Non connecté</span>
+        </div>
+        <p class="mt5-hint">Connectez-vous à votre compte AvaTrade pour activer le trading.</p>
+        <div class="mt5-btn-row">
+          <button class="mt5-btn btn-primary-full" onclick="mt5OuvrirModal()">
+            🔐 Connexion AvaTrade
+          </button>
+        </div>
+        <div class="mt5-auto-section">
+          <div class="mt5-auto-header">
+            <span class="mt5-auto-label">Trading Automatique</span>
+            <button class="mt5-toggle off disabled" disabled>
+              <span class="mt5-toggle-thumb"></span>
+              <span class="mt5-toggle-label">OFF</span>
+            </button>
+          </div>
+          <p class="mt5-auto-hint">Requiert une connexion MT5 active.</p>
+        </div>
+      </div>
+
+      <!-- Journal des opérations -->
+      <div class="mt5-journal-section">
+        <h3 class="mt5-journal-title">Journal des opérations</h3>
+        <div class="mt5-journal-header">
+          <span>Heure</span><span>Symbole</span><span>Action</span>
+          <span>Volume</span><span>Prix</span><span>Statut</span>
+        </div>
+        <div id="mt5-journal">
+          <p class="mt5-empty">Aucune opération enregistrée.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ===================== MODAL CONNEXION MT5 ===================== -->
+<div id="mt5-modal" class="mt5-modal-overlay hidden">
+  <div class="mt5-modal-box" role="dialog" aria-modal="true" aria-label="Connexion AvaTrade MT5">
+    <div class="mt5-modal-header">
+      <div class="mt5-modal-title-group">
+        <span class="mt5-modal-icon">🔐</span>
+        <div>
+          <h3 class="mt5-modal-title">Connexion AvaTrade</h3>
+          <p class="mt5-modal-sub">MetaTrader 5 — identifiants mémorisés sur cet appareil</p>
+        </div>
+      </div>
+      <button class="mt5-modal-close" onclick="mt5FermerModal()" aria-label="Fermer">✕</button>
+    </div>
+
+    <div class="mt5-modal-body">
+      <!-- CHEMIN LE PLUS SIMPLE, proposé en premier : reprendre le compte
+           déjà ouvert dans MetaTrader 5. Aucun identifiant à ressaisir, aucun
+           nom de serveur à deviner — trois occasions de se tromper en moins.
+           Rempli par mt5ChargerCompteOuvert(). -->
+      <div id="mt5-attacher-bloc" class="mt5-attacher hidden">
+        <div class="mt5-attacher-titre">✅ Compte détecté dans MetaTrader 5</div>
+        <div class="mt5-attacher-detail" id="mt5-attacher-detail"></div>
+        <button class="mt5-btn btn-primary-full" onclick="mt5Attacher()"
+                id="mt5-attacher-btn">
+          Utiliser ce compte (sans mot de passe)
+        </button>
+        <div class="mt5-attacher-ou">ou saisissez un autre compte ci-dessous</div>
+      </div>
+
+      <!-- Numéro de compte -->
+      <div class="mt5-field">
+        <label class="mt5-label" for="mt5-account">Numéro de compte MT5</label>
+        <input
+          id="mt5-account"
+          type="number"
+          class="mt5-input"
+          placeholder="Ex : 123456789"
+          min="10000"
+          autocomplete="off"
+        />
+      </div>
+
+      <!-- Mot de passe -->
+      <div class="mt5-field">
+        <label class="mt5-label" for="mt5-password">Mot de passe MT5</label>
+        <div class="mt5-input-wrap">
+          <input
+            id="mt5-password"
+            type="password"
+            class="mt5-input"
+            placeholder="Mot de passe"
+            autocomplete="current-password"
+          />
+          <button id="mt5-pwd-toggle" class="mt5-pwd-eye" type="button" aria-label="Afficher le mot de passe">👁</button>
+        </div>
+      </div>
+
+      <!-- Type de compte -->
+      <div class="mt5-field">
+        <label class="mt5-label">Type de compte</label>
+        <div class="mt5-radio-group">
+          <label class="mt5-radio-label">
+            <input type="radio" name="mt5-type" value="demo" checked class="mt5-radio" id="mt5-type-demo" />
+            <span class="mt5-radio-box demo">Démo</span>
+          </label>
+          <label class="mt5-radio-label">
+            <input type="radio" name="mt5-type" value="real" class="mt5-radio" id="mt5-type-real" />
+            <span class="mt5-radio-box real">Réel</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Serveur -->
+      <div class="mt5-field">
+        <!-- « Serveur MetaTrader 5 » et non « Serveur AvaTrade » : l'application
+             se connecte à N'IMPORTE QUEL serveur MT5 (AvaTrade, MetaQuotes,
+             autre courtier). Le libellé AvaTrade laissait croire qu'un compte
+             d'un autre courtier — ou un compte de démonstration MetaQuotes —
+             n'était pas utilisable ici. -->
+        <label class="mt5-label" for="mt5-server">Serveur MetaTrader 5</label>
+        <!-- SAISIE LIBRE avec suggestions (et non une liste fermée) : AvaTrade
+             exploite d'autres serveurs que les quelques noms de référence
+             selon l'entité et la région. Avec un <select>, quiconque avait un
+             compte hors de cette liste n'avait AUCUN moyen de saisir le sien.
+             Les suggestions sont remplies par /api/mt5/servers, qui lit les
+             serveurs réellement connus du terminal MetaTrader. -->
+        <input id="mt5-server" class="mt5-input" list="mt5-server-options"
+               autocomplete="off" spellcheck="false"
+               placeholder="Ex : Ava-Demo 1-MT5, MetaQuotes-Demo" value="Ava-Demo 1-MT5" />
+        <datalist id="mt5-server-options"></datalist>
+        <p class="mt5-server-hint" id="mt5-server-hint">
+          Nom EXACT affiché dans MetaTrader 5 → Fichier → Ouvrir un compte.
+        </p>
+      </div>
+
+      <!-- Erreur -->
+      <p id="mt5-modal-error" class="mt5-modal-error" role="alert"></p>
+
+      <!-- Avertissement sécurité -->
+      <div class="mt5-security-note">
+        🔒 Vos identifiants sont <strong>mémorisés sur cet appareil uniquement</strong>
+        (dossier personnel, fichier lisible par vous seul), afin de reconnecter
+        automatiquement votre compte au démarrage. Ils ne sont jamais envoyés
+        ailleurs qu'à MetaTrader 5. Pour les effacer : Réglages ⚙️ → Comptes (bouton ✕ ; pour le compte actif, basculez d'abord sur un autre compte ou déconnectez-vous).<br><br>
+        <strong>Ordres RÉELS sur AvaTrade :</strong> nécessite Windows avec MetaTrader 5
+        installé (Réglages ⚙️ → « Installer MetaTrader 5 »).<br>
+        <strong>Mode Simulation :</strong> sans MetaTrader 5, les ordres sont seulement
+        journalisés localement (test sans risque).
+      </div>
+    </div>
+
+    <div class="mt5-modal-footer">
+      <button class="mt5-btn btn-outline-sm" onclick="mt5FermerModal()">Annuler</button>
+      <button id="mt5-btn-connect" class="mt5-btn btn-primary-connect" onclick="mt5Connecter()">
+        Se connecter
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Zone de notifications flottantes -->
+<div id="mt5-notif" class="mt5-notif-container"></div>
+
+<!-- Bannière PWA "Ajouter à l'écran d'accueil" (iOS uniquement) -->
+<div id="pwa-install-banner">
+  <div>📱 Installez l'app sur votre iPhone !</div>
+  <div style="margin-top:0.3rem;color:var(--text-muted)">
+    Appuyez sur <strong>⎙ Partager</strong> puis <strong>Sur l'écran d'accueil</strong>
+  </div>
+  <button onclick="document.getElementById('pwa-install-banner').classList.remove('show');localStorage.setItem('pwa-dismissed','1')">
+    OK, compris
+  </button>
+</div>
+
+<script src="js/app.js"></script>
+<script src="js/mt5.js"></script>
+<script src="js/auto_trader.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/tools.js"></script>
+<script>
+  // Afficher la bannière sur iOS si pas encore installé et pas encore fermée
+  (function() {
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isStandalone = window.navigator.standalone === true;
+    const dismissed = localStorage.getItem('pwa-dismissed');
+    if (isIOS && !isStandalone && !dismissed) {
+      setTimeout(() => document.getElementById('pwa-install-banner').classList.add('show'), 3000);
+    }
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+﻿Installation terminée.
+===========================================================================
+
+POUR DÉMARRER
+
+  1.  Lancez « Agence Numérique Financière » depuis le Bureau ou le menu
+      Démarrer.
+  2.  Le premier démarrage peut prendre jusqu'à une minute : les 46 agents et
+      leurs assistants se chargent.
+  3.  Code d'accès par défaut : 497040 — changez-le dans Réglages ⚙️.
+  4.  Choisissez votre moteur d'IA local : Ollama ou Hermès.
+
+DEPUIS VOTRE TÉLÉPHONE
+
+L'écran de démarrage affiche une adresse du type http://192.168.1.20:8765.
+Ouvrez-la depuis votre mobile connecté au même Wi-Fi, puis ajoutez la page à
+l'écran d'accueil : l'application s'installe comme une application native.
+
+Au tout premier lancement, Windows demande si l'application peut communiquer
+sur le réseau. Répondez « Autoriser » pour les réseaux PRIVÉS : sans cela,
+l'application fonctionne parfaitement sur ce PC, mais votre téléphone ne
+pourra pas s'y connecter. L'installation ne pose pas cette règle à votre
+place — elle exigerait des droits administrateur, dont ce programme se passe
+volontairement.
+
+VOS DONNÉES
+
+Historique de trading, réglages, identifiants MetaTrader et modèles d'IA sont
+enregistrés dans :
+
+      %USERPROFILE%\.agence_financiere
+
+Ce dossier est CONSERVÉ lors d'une mise à jour, et n'est supprimé à la
+désinstallation que si vous le demandez explicitement.
+
+EN CAS DE PROBLÈME
+
+Réglages ⚙️ → Diagnostic affiche la cause exacte des erreurs. Les journaux se
+trouvent dans %USERPROFILE%\.agence_financiere\serveur.log.
+
+RAPPEL : commencez sur un compte de démonstration.

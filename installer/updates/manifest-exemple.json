@@ -1,0 +1,15 @@
+{
+  "_commentaire": [
+    "Exemple de manifeste de mise a jour. Publiez ce fichier a une URL stable",
+    "(hebergement statique, release GitHub, partage reseau) et renseignez",
+    "AGENCE_UPDATE_URL pour que l'application la consulte au demarrage.",
+    "Sans cette variable, aucune verification n'a lieu et aucune connexion",
+    "n'est ouverte : l'application reste 100 % locale.",
+    "Lu par python/utils/mise_a_jour.py ; expose par /api/mise-a-jour."
+  ],
+  "version": "4.1.0",
+  "url": "https://exemple.tld/telechargements/AgenceNumerique-Setup-4.1.0.exe",
+  "notes": "Correction du calcul de drawdown et nouveaux symboles AvaTrade.",
+  "obligatoire": false,
+  "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+}
