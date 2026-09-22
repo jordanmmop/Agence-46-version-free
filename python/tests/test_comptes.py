@@ -538,7 +538,25 @@ def test_guide_de_deploiement_complet():
         assert element in guide, f"DEPLOIEMENT.md ne mentionne pas : {element}"
     # Et il doit avertir du partage de l'état de trading.
     assert "singletons" in guide.lower() or "PARTAGÉ" in guide
-    print("  OK — guide de déploiement complet (Stripe, proxy, avertissements)")
+
+    # Les deux scripts qu'il cite doivent exister et être exécutables.
+    for nom in ("configurer-serveur.sh", "verifier-serveur.sh"):
+        script = _RACINE / "scripts" / nom
+        assert script.is_file(), f"scripts/{nom} manquant"
+        assert nom in guide, f"DEPLOIEMENT.md ne cite pas scripts/{nom}"
+        texte = script.read_text(encoding="utf-8")
+        # Un script de configuration ne doit contenir AUCUN secret en dur :
+        # il les demande, il ne les porte pas.
+        import re
+        assert not re.search(r"sk_(live|test)_[A-Za-z0-9]{10,}", texte), \
+            f"{nom} contient une clé Stripe"
+        assert not re.search(r"whsec_[A-Za-z0-9]{16,}", texte), \
+            f"{nom} contient un secret de webhook"
+    # Le fichier produit doit être en 600 : il porte les secrets.
+    conf = (_RACINE / "scripts" / "configurer-serveur.sh").read_text(encoding="utf-8")
+    assert "chmod 600" in conf and "umask 077" in conf, \
+        "le script n'assure pas la confidentialité du .env qu'il écrit"
+    print("  OK — guide complet, scripts présents et sans secret en dur")
 
 
 def test_interface_expose_inscription_et_formules():

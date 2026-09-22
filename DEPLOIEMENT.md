@@ -147,6 +147,21 @@ Stripe → Développeurs → Clés API → **clé secrète** (`sk_live_…`).
 
 ## 4. Configurer le serveur
 
+### Le plus simple : le script
+
+```bash
+cd /opt/agence/app
+sudo -u agence bash scripts/configurer-serveur.sh
+```
+
+Il demande la clé secrète Stripe, le secret du webhook et votre domaine, les
+contrôle (une clé `pk_` au lieu de `sk_`, un domaine en `http://` sont
+refusés), puis écrit `python/.env` en **mode 600**. Les secrets saisis ne sont
+jamais affichés, et une configuration existante est sauvegardée avant d'être
+remplacée.
+
+### Ou à la main
+
 Créez `/opt/agence/app/python/.env` (ignoré par git) :
 
 ```ini
@@ -241,6 +256,20 @@ sudo certbot --nginx -d agence.mondomaine.fr
 ---
 
 ## 7. Vérifier — dans cet ordre
+
+### Le plus simple : le script
+
+```bash
+bash scripts/verifier-serveur.sh https://agence.mondomaine.fr
+```
+
+Il contrôle que le serveur répond, que l'application est bien **fermée sans
+compte**, que les deux secrets Stripe sont lus, que les liens ne sont plus en
+mode test, qu'aucun secret ne sort par une route publique, et que le cookie de
+session porte `Secure`. Il sort en code 1 s'il reste un problème bloquant —
+utilisable tel quel dans un script de déploiement.
+
+### Ou à la main
 
 ```bash
 # 1. Le serveur répond
