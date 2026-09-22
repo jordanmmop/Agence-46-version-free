@@ -23,6 +23,13 @@ services:
       # l'URL du service.
       - key: LICENCE_API_URL
         sync: false
+      # Paiement Stripe. SECRETS : « sync: false » signifie qu'aucune valeur
+      # n'est committée ici — elles se saisissent dans le tableau de bord de
+      # l'hébergeur. Sans elles, aucun paiement ne peut être confirmé.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
       - key: CAPITAL_INITIAL
         value: "100000"
       - key: BACKEND_HOST

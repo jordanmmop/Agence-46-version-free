@@ -41,6 +41,104 @@ Version Pro : accès complet après abonnement.
 
 ---
 
+## Compte utilisateur et essai de 3 jours
+
+**L'application exige un compte.** Sans inscription puis connexion, rien n'est
+utilisable : toutes les routes répondent `401` et l'interface présente l'écran
+de création de compte.
+
+L'inscription demande : **e-mail, mot de passe, téléphone, adresse postale**
+(adresse, code postal, ville, pays). Elle ouvre immédiatement un **essai
+gratuit de 3 jours**, avec les limites d'essai détaillées plus bas.
+
+> **Aucune carte bancaire n'est demandée à l'inscription**, et l'application
+> n'en stocke aucune, sous aucune forme — ni numéro, ni date d'expiration, ni
+> cryptogramme. La carte est saisie **sur les pages de Stripe**, jamais ici.
+> C'est un choix de sécurité : détenir ces données imposerait la conformité
+> PCI-DSS et ferait porter à l'éditeur le risque d'une fuite, pour un service
+> que Stripe rend déjà. L'application n'apprend du paiement que son résultat.
+
+### Passé les 3 jours
+
+Sans abonnement, le compte est **suspendu** : l'application devient
+inutilisable (`402` sur toutes les routes) et seul l'écran d'abonnement reste
+joignable — c'est le seul moyen de régulariser.
+
+### Un contact ne peut pas resservir
+
+Un e-mail ou un téléphone déjà enregistré est refusé. La comparaison se fait
+sur des **clés canoniques**, ce qui bloque les réinscriptions déguisées :
+
+| Tentative | Résultat |
+|---|---|
+| `JEAN.DUPONT@…` après `jean.dupont@…` | refusée (casse) |
+| `jean+essai2@…` après `jean@…` | refusée (alias « + ») |
+| `+33 6 12 34 56 78` après `06 12 34 56 78` | refusée (format international) |
+| `0033612345678`, `06.12.34.56.78` | refusées |
+
+L'unicité est portée par des **index UNIQUE en base**, donc tenue par le
+moteur lui-même : deux inscriptions simultanées ne peuvent pas passer toutes
+les deux.
+
+## Abonnement Pro — deux formules
+
+| Formule | Prix | Lien de paiement |
+|---|---|---|
+| Mensuel | **78,79 €** / mois | `buy.stripe.com/test_aFaaEX7ol6Nc9ZsewvdZ601` |
+| Annuel | **849,99 €** / an | `buy.stripe.com/test_00w8wP3851sS0oS1JJdZ602` |
+
+> ⚠️ Ces liens sont des liens Stripe **de test** : ils n'encaissent aucun
+> paiement réel. Les remplacer par les liens de production dans
+> `python/licence/config.py` avant toute mise en vente — c'est le seul
+> changement à faire.
+
+Une fois le règlement **confirmé par Stripe**, le compte passe en `abonné` et
+l'intégralité des agents IA et des fonctionnalités avancées est débloquée.
+
+### Comment un paiement est confirmé
+
+Rien de ce qui vient du navigateur ne vaut preuve de paiement — ni « j'ai
+payé » cliqué dans l'interface, ni un retour sur l'URL de succès, ni un
+identifiant collé à la main. Deux sources, toutes deux côté serveur :
+
+1. **Webhook Stripe** (`POST /api/abonnement/webhook`) — chemin de référence.
+   La requête est **signée** ; la signature est vérifiée avec
+   `STRIPE_WEBHOOK_SECRET`, avec protection contre le rejeu. C'est lui qui
+   porte aussi les renouvellements.
+2. **Relecture de session** (`STRIPE_SECRET_KEY`) — au retour de Stripe,
+   l'application demande à l'API l'état réel de la session de paiement.
+
+La **formule est déduite du montant réellement encaissé**, jamais d'un
+paramètre d'URL : on ne choisit pas l'annuel en réglant le tarif mensuel.
+
+Sans ces deux secrets, **aucun paiement ne peut être confirmé** : l'application
+le dit clairement et le compte reste fermé.
+
+### États du compte
+
+| État | Effet |
+|---|---|
+| `COMPTE_REQUIS` | personne n'est connecté — application fermée |
+| `TRIAL` | essai en cours — limites d'essai |
+| `TRIAL_EXPIRED` | 3 jours écoulés sans paiement — **compte suspendu** |
+| `PRO_ACTIVE` | abonnement payé et vérifié — **tout est débloqué** |
+| `PRO_EXPIRED` | abonnement échu — compte suspendu |
+| `PAYMENT_REQUIRED` | paiement attendu ou refusé — compte suspendu |
+| `SUSPENDU` | compte suspendu par l'éditeur |
+
+Un seul état débloque les fonctionnalités Pro (`PRO_ACTIVE`) ; deux seulement
+rendent l'application utilisable (`PRO_ACTIVE` et `TRIAL`).
+
+## Stockage des comptes
+
+Les comptes vivent dans la base de l'application, derrière un **dépôt**
+(`DepotComptes`) qui isole complètement le reste du code du support de
+stockage. Basculer vers une base distante ne demande de réécrire que cette
+classe — aucun appelant ne connaît SQLite.
+
+Les mots de passe sont hachés en **PBKDF2-HMAC-SHA256**, 200 000 itérations,
+sel aléatoire par compte. Jamais en clair, jamais exposés par une route.
+
 ## Détail des limites appliquées
 
 Toutes ces valeurs sont centralisées dans **`python/licence/config.py`** et

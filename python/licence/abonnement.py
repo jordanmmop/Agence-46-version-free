@@ -76,11 +76,17 @@ def identifiant_installation() -> str:
 def compte_id() -> str:
     """Compte auquel rattacher les quotas.
 
-    Abonné : le sujet de sa licence (le même compte le suit d'une machine à
-    l'autre). Sinon : l'installation. Dans les deux cas, le compteur vit côté
-    serveur applicatif (base SQLite locale), jamais dans le navigateur — une
-    remise à zéro depuis l'interface est impossible.
+    C'est le compte UTILISATEUR connecté : ses 20 requêtes par jour le suivent
+    d'un appareil à l'autre, et se déconnecter ou vider le navigateur ne les
+    remet pas à zéro. À défaut de compte (licence signée hors session, outil
+    en ligne de commande), on retombe sur le sujet de la licence puis sur
+    l'installation — le compteur existe toujours.
     """
+    from licence import comptes
+    courant = comptes.compte_courant()
+    if courant and courant.get("id"):
+        return f"compte:{courant['id']}"
+
     infos = etat_complet()
     sujet = infos.get("sujet") or ""
     if infos.get("est_pro") and sujet:
@@ -106,15 +112,57 @@ def _jeton_enregistre() -> str:
         return ""
 
 
+def _etat_du_compte_connecte() -> Optional[Dict[str, Any]]:
+    """État issu du COMPTE connecté, ou None si personne ne l'est.
+
+    C'est la source PRIORITAIRE : l'application exige un compte, et c'est lui
+    qui porte l'essai de 3 jours et l'abonnement Stripe. La licence signée
+    (voir plus bas) reste un second chemin, pour une activation hors ligne ou
+    une licence d'entreprise.
+    """
+    from licence import comptes
+    courant = comptes.compte_courant()
+    if not courant:
+        return None
+    etat = comptes.etat_du_compte(courant)
+    return {
+        "etat": etat.value,
+        "libelle": etat.libelle,
+        "message": etat.message,
+        "est_pro": etat.est_pro,
+        "utilisable": etat.utilisable,
+        "compte_suspendu": etat.compte_suspendu,
+        "sujet": courant.get("email", ""),
+        "expire_le": int(courant["abonne_jusqua"]) if courant.get("abonne_jusqua") else None,
+        "essai_fin": int(courant["essai_fin"]) if courant.get("essai_fin") else None,
+        "essai_jours_restants": round(comptes.jours_essai_restants(courant), 2),
+        "formule": courant.get("formule") or "",
+        "fournisseur": "stripe",
+        "compte": comptes.public(courant),
+        "verifie_le": int(time.time()),
+    }
+
+
 def _calculer_etat() -> Dict[str, Any]:
     jeton = _jeton_enregistre()
     if not jeton:
-        etat, infos = EtatLicence.TRIAL, {}
+        # PERSONNE n'est connecté et aucune licence signée n'est installée :
+        # l'application exige un compte, l'état est donc COMPTE_REQUIS — et
+        # surtout pas un essai ouvert à qui n'a rien créé. C'est ce point qui
+        # rend « sans compte, pas d'application » vrai jusque dans le socle.
+        etat, infos = EtatLicence.COMPTE_REQUIS, {}
+        if not lconfig.COMPTE_OBLIGATOIRE:
+            etat = EtatLicence.TRIAL
     else:
         etat, infos = lire_jeton(jeton)
         # Un jeton PRÉSENT mais refusé n'est pas une absence de licence : le
         # dire, sinon l'utilisateur qui vient de coller sa clé ne comprend pas
         # pourquoi rien ne change.
+        # UNIQUEMENT un jeton REJETÉ (lire_jeton renvoie alors TRIAL) devient
+        # « paiement requis ». Une licence EXPIRÉE a déjà son propre état,
+        # PRO_EXPIRED, qui dit quelque chose de plus précis — et que l'écran
+        # d'abonnement utilise pour proposer un renouvellement plutôt qu'une
+        # première souscription.
         if etat is EtatLicence.TRIAL and infos.get("erreur"):
             etat = EtatLicence.PAYMENT_REQUIRED
 
@@ -123,6 +171,8 @@ def _calculer_etat() -> Dict[str, Any]:
         "libelle": etat.libelle,
         "message": infos.get("erreur") and f"{etat.message} ({infos['erreur']})" or etat.message,
         "est_pro": etat.est_pro,
+        "utilisable": etat.utilisable,
+        "compte_suspendu": etat.compte_suspendu,
         "sujet": infos.get("sujet", ""),
         "expire_le": infos.get("expire_le"),
         "fournisseur": fournisseur_configure(),
@@ -137,6 +187,26 @@ def etat_complet(forcer: bool = False) -> Dict[str, Any]:
     gardée : sans cache, chaque battement de cœur du tableau de bord relirait
     la configuration sur disque.
     """
+    # Un compte connecté n'est JAMAIS mis en cache : le cache est global au
+    # processus, alors que le compte change d'une requête à l'autre (plusieurs
+    # appareils du même Wi-Fi, déconnexion, fin d'essai à la minute près).
+    # Le mettre en cache servirait l'état d'un utilisateur à un autre.
+    depuis_compte = _etat_du_compte_connecte()
+    if depuis_compte is not None:
+        # Une licence SIGNÉE valide l'emporte sur l'état du compte, et jamais
+        # l'inverse : c'est le chemin des licences d'entreprise et des
+        # activations hors ligne, posées sur le poste indépendamment de qui
+        # s'y connecte. On retient donc le plus généreux des deux — sans quoi
+        # un poste sous licence d'entreprise retomberait en essai dès qu'un
+        # utilisateur ouvre une session.
+        if not depuis_compte.get("est_pro"):
+            signee = _calculer_etat()
+            if signee.get("est_pro"):
+                signee["compte"] = depuis_compte.get("compte", {})
+                signee["utilisable"] = True
+                return signee
+        return depuis_compte
+
     global _cache, _cache_expire
     with _lock:
         if not forcer and _cache is not None and time.time() < _cache_expire:
@@ -151,8 +221,22 @@ def etat() -> EtatLicence:
 
 
 def est_pro() -> bool:
-    """Vrai UNIQUEMENT sur licence Pro vérifiée et non expirée."""
+    """Vrai UNIQUEMENT sur abonnement payé (ou licence signée) en cours."""
     return bool(etat_complet().get("est_pro"))
+
+
+def utilisable() -> bool:
+    """L'application est-elle utilisable du tout par l'appelant ?
+
+    Faux tant que personne n'est connecté, et faux dès que l'essai de 3 jours
+    est écoulé sans paiement. C'est ce qui rend l'application « inutilisable
+    tant que le paiement n'est pas fait ».
+    """
+    infos = etat_complet()
+    if "utilisable" in infos:
+        return bool(infos["utilisable"])
+    # Chemin « licence signée » : pas de compte, donc pas d'essai à surveiller.
+    return EtatLicence.depuis(infos.get("etat")).utilisable
 
 
 def invalider_cache() -> None:

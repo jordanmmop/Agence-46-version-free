@@ -48,10 +48,31 @@ def _isoler(tmp=None):
     # `_setup.py` place une licence Pro éphémère pour que la suite historique
     # exerce l'application complète. CE module teste l'inverse : chaque cas
     # repart donc SANS licence, et installe la sienne s'il en a besoin.
-    from licence import abonnement
+    from licence import abonnement, comptes
     os.environ.pop("AGENCE_LICENCE_JETON", None)
     abonnement.invalider_cache()
+    # Aucun compte connecté au départ : chaque cas pose le sien s'il en veut
+    # un. Sans cette remise à zéro, le compte d'un cas précédent — dans une
+    # base qui n'existe plus — resterait le compte courant.
+    comptes.definir_compte_courant(None)
     return dossier
+
+
+def _compte_essai(abonne: bool = False):
+    """Crée un compte et le pose comme COMPTE COURANT du test.
+
+    Les fonctions de `licence.gate` lisent le compte de la requête en cours.
+    Hors HTTP — ce que fait ce module quand il teste la porte directement —
+    il faut donc poser ce compte à la main, exactement comme le fait le
+    middleware à chaque requête.
+    """
+    import sys
+    sys.path.insert(0, str(_RACINE))
+    import _client as outil
+    from licence import comptes
+    compte = outil.creer_compte(abonne=abonne)
+    comptes.definir_compte_courant(compte)
+    return compte
 
 
 class _Emetteur:
@@ -81,13 +102,17 @@ class _Emetteur:
         return f"AGENCE1.{charge}.{b64e(self._priv.sign(charge.encode('ascii')))}"
 
 
-def _client():
-    """Client HTTP sur l'application réelle (routes et gardes comprises)."""
+def _client(abonne: bool = False):
+    """Client HTTP sur l'application réelle (routes et gardes comprises).
+
+    Compte NON abonné par défaut : ce module vérifie précisément ce que la
+    version d'essai autorise et refuse.
+    """
     import sys
     sys.path.insert(0, str(_RACINE))
-    from fastapi.testclient import TestClient
+    import _client as outil
     from backend.main import app
-    return TestClient(app)
+    return outil.client(app, abonne=abonne)
 
 
 # ═══════════════════════════ LIMITES DE L'ESSAI ═══════════════════════════
@@ -140,6 +165,7 @@ def test_cycle_n_interroge_que_les_agents_autorises():
 
 def test_quota_horaire_puis_journalier():
     _isoler()
+    _compte_essai()
     from licence import gate
 
     for i in range(5):
@@ -157,21 +183,25 @@ def test_quota_compte_dans_la_base_pas_dans_le_navigateur():
     """Le compteur est rattaché au COMPTE, côté serveur. Le vider côté client
     n'existe pas : il n'y a rien à vider côté client."""
     _isoler()
+    _compte_essai()
     from licence import abonnement, quota
 
     compte = abonnement.compte_id()
-    assert compte.startswith("trial:")
+    # Rattaché au COMPTE UTILISATEUR : le quota le suit d'un appareil à
+    # l'autre, et se déconnecter ne le remet pas à zéro.
+    assert compte.startswith("compte:"), compte
     quota.enregistrer(compte)
     quota.enregistrer(compte)
     assert quota.utilisation(compte)["jour"] == 2
     # Un AUTRE compte a son propre compteur (un abonné ne récupère pas le
     # quota consommé pendant son essai, et réciproquement).
-    assert quota.utilisation("pro:quelqu-un-dautre")["jour"] == 0
-    print("  OK — compteur en base, par compte, invisible du navigateur")
+    assert quota.utilisation("compte:quelqu-un-dautre")["jour"] == 0
+    print("  OK — compteur en base, rattaché au compte, invisible du navigateur")
 
 
 def test_un_seul_symbole_par_analyse_en_essai():
     _isoler()
+    _compte_essai()
     from licence import gate
     retenus, ecartes = gate.limiter_symboles(["BTC-USD", "AAPL", "ETH-USD"])
     assert retenus == ["BTC-USD"]
@@ -298,13 +328,19 @@ def test_licence_expiree_revient_a_lessai():
     print("  OK — licence expirée : PRO_EXPIRED, retour aux limites d'essai")
 
 
-def test_les_quatre_etats_existent():
+def test_etats_du_cycle_de_vie():
     from licence.etat import EtatLicence
-    attendus = {"TRIAL", "PRO_ACTIVE", "PRO_EXPIRED", "PAYMENT_REQUIRED"}
+    attendus = {"COMPTE_REQUIS", "TRIAL", "TRIAL_EXPIRED", "PRO_ACTIVE",
+                "PRO_EXPIRED", "PAYMENT_REQUIRED", "SUSPENDU"}
     assert {e.value for e in EtatLicence} == attendus
-    # UN SEUL état débloque.
+    # UN SEUL état débloque les fonctionnalités Pro.
     assert [e.value for e in EtatLicence if e.est_pro] == ["PRO_ACTIVE"]
-    print("  OK — TRIAL / PRO_ACTIVE / PRO_EXPIRED / PAYMENT_REQUIRED")
+    # DEUX SEULEMENT rendent l'application utilisable.
+    assert sorted(e.value for e in EtatLicence if e.utilisable) == \
+        ["PRO_ACTIVE", "TRIAL"]
+    # Une valeur inconnue retombe sur l'état le plus FERMÉ, jamais sur l'essai.
+    assert EtatLicence.depuis("n_importe_quoi") is EtatLicence.COMPTE_REQUIS
+    print("  OK — 7 états, 1 seul Pro, 2 seuls utilisables, repli fermé")
 
 
 def test_aucun_faux_paiement():
@@ -409,11 +445,15 @@ def test_api_status_transporte_loffre():
 def test_quota_route_analyser_repond_429():
     """La limite est tenue par le SERVEUR : atteinte, /api/analyser refuse."""
     _isoler()
-    from licence import abonnement, quota
-    compte = abonnement.compte_id()
+    from licence import quota
+    c = _client()
+    # Le quota est rattaché au COMPTE du client, pas à l'installation : il
+    # faut donc le remplir pour CE compte-là. (Le remplir « pour
+    # l'installation » ne bloquait rien et laissait passer l'analyse — la
+    # première version de ce test mesurait autre chose que ce qu'elle croyait.)
+    compte = f"compte:{c.compte_agence['id']}"
     for _ in range(5):
         quota.enregistrer(compte)
-    c = _client()
     r = c.post("/api/analyser", json=["BTC-USD"])
     assert r.status_code == 429, f"{r.status_code} au lieu de 429"
     d = r.json()
@@ -583,7 +623,7 @@ def run():
         test_aucune_cle_privee_dans_le_code_distribue()
         test_pro_debloque_tout()
         test_licence_expiree_revient_a_lessai()
-        test_les_quatre_etats_existent()
+        test_etats_du_cycle_de_vie()
         test_aucun_faux_paiement()
         test_routes_pro_refusees_en_essai()
         test_routes_ouvertes_le_restent()

@@ -958,7 +958,8 @@ def _client():
     from fastapi.testclient import TestClient
     import backend.main as bm
     _isoler_config()
-    cl = TestClient(bm.app, raise_server_exceptions=False)
+    import _client
+    cl = _client.client(bm.app)
     cl.__enter__()
     cl.post("/api/login", json={"password": "497040"})
     return cl, bm

@@ -23,6 +23,50 @@ from licence.etat import EtatLicence
 logger = logging.getLogger(__name__)
 
 
+class CompteRequis(Exception):
+    """Aucun compte connecté — l'application est inutilisable.
+
+    Traduite en 401 par le backend : l'interface montre alors l'écran
+    d'inscription / connexion, et non un message d'erreur.
+    """
+
+    def payload(self) -> Dict[str, Any]:
+        return {
+            "error": "Créez un compte ou connectez-vous pour utiliser "
+                     "l'application.",
+            "compte_requis": True,
+            "etat": EtatLicence.COMPTE_REQUIS.value,
+            "essai_jours": lconfig.TRIAL_DUREE_JOURS,
+        }
+
+
+class AbonnementRequis(Exception):
+    """Compte existant, mais essai écoulé ou abonnement échu.
+
+    C'est l'état « application fermée tant que le paiement n'est pas fait ».
+    Distinct de `ProRequis` : là il s'agit d'une fonctionnalité verrouillée
+    dans un essai qui tourne, ici plus rien ne tourne du tout.
+    """
+
+    def __init__(self, etat: "EtatLicence"):
+        self.etat = etat
+        super().__init__(etat.message)
+
+    def payload(self) -> Dict[str, Any]:
+        from licence import stripe_paiement
+        from licence import comptes
+        courant = comptes.compte_courant() or {}
+        return {
+            "error": self.etat.message,
+            "abonnement_requis": True,
+            "compte_suspendu": True,
+            "etat": self.etat.value,
+            "libelle": self.etat.libelle,
+            "paiement": stripe_paiement.etat_paiement(courant.get("id", "")),
+            "store_url": lconfig.MICROSOFT_STORE_URL,
+        }
+
+
 class ProRequis(Exception):
     """Fonctionnalité réservée à l'abonnement Pro.
 
@@ -78,6 +122,27 @@ class QuotaDepasse(Exception):
 
 # ═══════════════════════════ FONCTIONNALITÉS ══════════════════════════════
 
+def application_utilisable() -> bool:
+    """L'appelant peut-il utiliser l'application, ne serait-ce qu'en essai ?"""
+    return abonnement.utilisable()
+
+
+def exiger_application_utilisable() -> None:
+    """Garde MAÎTRESSE, en amont de toutes les autres.
+
+    Lève `CompteRequis` si personne n'est connecté, `AbonnementRequis` si
+    l'essai de 3 jours est écoulé ou l'abonnement échu. Tant qu'elle n'est pas
+    franchie, rien d'autre n'a à être évalué : ni les fonctionnalités, ni les
+    agents, ni les quotas.
+    """
+    etat = EtatLicence.depuis(abonnement.etat_complet().get("etat"))
+    if etat.utilisable:
+        return
+    if etat is EtatLicence.COMPTE_REQUIS:
+        raise CompteRequis()
+    raise AbonnementRequis(etat)
+
+
 def autorise(feature: str) -> bool:
     """La fonctionnalité est-elle accessible dans l'état d'abonnement courant ?
 
@@ -87,13 +152,25 @@ def autorise(feature: str) -> bool:
     if feature not in lconfig.FEATURES:
         logger.warning("[licence] Fonctionnalité inconnue refusée : %s", feature)
         return False
+    # Compte absent, essai écoulé, abonnement échu : PLUS RIEN n'est autorisé,
+    # pas même le socle d'essai. Sans ce contrôle en tête, un compte suspendu
+    # aurait gardé l'analyse manuelle et la consultation — l'application ne
+    # serait pas « inutilisable tant que le paiement n'est pas fait ».
+    if not application_utilisable():
+        return False
     if feature in lconfig.TRIAL_FEATURES:
         return True
     return abonnement.est_pro()
 
 
 def exiger(feature: str, detail: str = "") -> None:
-    """Laisse passer, ou lève `ProRequis`. À appeler AVANT tout effet."""
+    """Laisse passer, ou lève. À appeler AVANT tout effet.
+
+    L'ordre des refus compte : proposer « Passer à Pro » à quelqu'un qui n'a
+    pas encore de compte, ou à un compte suspendu dont l'essai est fini, serait
+    répondre à côté. On lève donc d'abord `CompteRequis` / `AbonnementRequis`.
+    """
+    exiger_application_utilisable()
     if not autorise(feature):
         raise ProRequis(feature, detail)
 
@@ -221,6 +298,7 @@ def autoriser_analyse(symboles: Sequence[str]) -> Dict[str, Any]:
     requête et renvoie de quoi renseigner l'utilisateur (symboles retenus,
     symboles écartés, quotas restants).
     """
+    exiger_application_utilisable()
     retenus, ecartes = limiter_symboles(symboles)
     quotas_maj = consommer_requete("analyse")
     return {"symboles": retenus, "symboles_ecartes": ecartes, "quotas": quotas_maj}
@@ -234,17 +312,33 @@ def etat_public(tous_les_agents: Sequence = ()) -> Dict[str, Any]:
     Ne contient AUCUN secret : ni jeton de licence, ni clé, ni identifiant
     d'installation — seulement l'offre en cours, les quotas et le périmètre.
     """
+    from licence import comptes, stripe_paiement
     infos = abonnement.etat_complet()
     etat = EtatLicence.depuis(infos.get("etat"))
     pro = etat.est_pro
     total = len(tous_les_agents)
     autorises = ids_agents_autorises(tous_les_agents) if total else []
+    courant = comptes.compte_courant()
 
     return {
         "etat": etat.value,
         "libelle": etat.libelle,
         "message": infos.get("message", etat.message),
         "est_pro": pro,
+        # L'interface s'en sert pour choisir SON ÉCRAN : inscription,
+        # tableau de bord, ou mur de paiement.
+        "utilisable": etat.utilisable,
+        "compte_requis": etat is EtatLicence.COMPTE_REQUIS,
+        "compte_suspendu": etat.compte_suspendu,
+        "compte": comptes.public(courant),
+        "essai": {
+            "jours": lconfig.TRIAL_DUREE_JOURS,
+            "fin": infos.get("essai_fin"),
+            "jours_restants": infos.get("essai_jours_restants"),
+            "en_cours": etat is EtatLicence.TRIAL,
+        },
+        "paiement": stripe_paiement.etat_paiement(
+            (courant or {}).get("id", "")),
         "expire_le": infos.get("expire_le"),
         "fournisseur": infos.get("fournisseur", ""),
         "abonnement_disponible": bool(abonnement.url_emetteur()),

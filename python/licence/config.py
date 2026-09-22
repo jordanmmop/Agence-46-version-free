@@ -114,6 +114,79 @@ TRIAL_FEATURES = frozenset({
 assert TRIAL_FEATURES.isdisjoint(PRO_FEATURES), "Une fonctionnalité ne peut pas être à la fois Essai et Pro"
 assert (TRIAL_FEATURES | PRO_FEATURES) == set(FEATURES), "FEATURES et les offres ont divergé"
 
+# ═══════════════════════════ COMPTE UTILISATEUR ═══════════════════════════
+
+# L'application exige un COMPTE. Sans inscription puis connexion, rien n'est
+# utilisable : c'est le compte qui porte l'essai, l'abonnement et les quotas.
+COMPTE_OBLIGATOIRE = True
+
+# Durée de l'essai gratuit, à compter de la CRÉATION du compte. Passé ce
+# délai sans abonnement, le compte est SUSPENDU et l'application inutilisable.
+TRIAL_DUREE_JOURS = 3
+
+# Durée d'une session ouverte (jours). Au-delà, il faut se reconnecter.
+SESSION_DUREE_JOURS = 30
+
+# Champs EXIGÉS à l'inscription. La carte bancaire n'y figure pas
+# VOLONTAIREMENT : elle est saisie chez Stripe, sur ses pages, jamais ici.
+# Voir la note « CARTE BANCAIRE » plus bas.
+CHAMPS_INSCRIPTION = ("email", "mot_de_passe", "telephone", "adresse",
+                      "code_postal", "ville", "pays")
+
+# Longueur minimale du mot de passe.
+MOT_DE_PASSE_MIN = 8
+
+# ═══════════════════════════ FORMULES D'ABONNEMENT ════════════════════════
+#
+# CARTE BANCAIRE — CE QUE L'APPLICATION NE FAIT PAS, ET POURQUOI
+# --------------------------------------------------------------
+# L'application ne demande, ne transporte et n'enregistre AUCUN numéro de
+# carte, date d'expiration ou cryptogramme. Jamais.
+#
+# Ce n'est pas un raccourci : détenir ces données impose la conformité PCI-DSS
+# (audit, cloisonnement réseau, chiffrement, journalisation), engage la
+# responsabilité de l'éditeur en cas de fuite, et n'apporte rien — Stripe le
+# fait déjà, mieux, sur ses propres pages.
+#
+# Le paiement se fait donc INTÉGRALEMENT sur les pages Stripe ci-dessous :
+# l'utilisateur y saisit sa carte, Stripe encaisse, et l'application n'apprend
+# que le RÉSULTAT (payé / non payé) — jamais le moyen de paiement.
+
+# Les deux formules proposées dans l'application.
+#
+# ⚠️ Les liens ci-dessous sont des liens Stripe de TEST (« /test_ ») : ils
+# n'encaissent aucun paiement réel. Les remplacer par les liens de production
+# avant toute mise en vente — c'est le SEUL changement à faire ici.
+FORMULES = {
+    "mensuel": {
+        "id": "mensuel",
+        "libelle": "Pro — Mensuel",
+        "prix": 78.79,
+        "devise": "EUR",
+        "periode": "mois",
+        "description": "78,79 € par mois, sans engagement de durée.",
+        "lien_paiement": "https://buy.stripe.com/test_aFaaEX7ol6Nc9ZsewvdZ601",
+    },
+    "annuel": {
+        "id": "annuel",
+        "libelle": "Pro — Annuel",
+        "prix": 849.99,
+        "devise": "EUR",
+        "periode": "an",
+        "description": "849,99 € par an, soit environ 10 % d'économie "
+                       "par rapport au mensuel.",
+        "lien_paiement": "https://buy.stripe.com/test_00w8wP3851sS0oS1JJdZ602",
+    },
+}
+
+FORMULE_DEFAUT = "mensuel"
+
+# Durée de droits ouverte par un paiement confirmé, par formule (en jours).
+# Un abonnement Stripe renouvelle de lui-même ; cette durée est la VALIDITÉ
+# LOCALE accordée entre deux confirmations, avec une marge pour absorber un
+# prélèvement décalé de quelques jours.
+DUREE_DROITS_JOURS = {"mensuel": 31 + 3, "annuel": 365 + 7}
+
 # ═══════════════════════════ BOUTIQUE / ABONNEMENT ════════════════════════
 
 # Fiche officielle de l'application. Ce n'est PAS un secret : une URL publique

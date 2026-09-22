@@ -134,10 +134,42 @@ la fois l'application (`/api/health`), la fiche de propriétés de l'exe et
 l'assistant d'installation. Pour publier une nouvelle version, modifiez ce
 fichier puis relancez `build_installer.bat`.
 
+## Compte, essai de 3 jours et abonnement
+
+**L'application exige un compte.** Sans inscription puis connexion, rien n'est
+utilisable. L'inscription demande e-mail, mot de passe, téléphone et adresse
+postale, et ouvre un **essai gratuit de 3 jours**. Passé ce délai sans
+abonnement, le compte est **suspendu** et l'application fermée — seul l'écran
+de paiement reste joignable.
+
+> **Aucune carte bancaire n'est demandée ni stockée par l'application.** La
+> carte se saisit sur les pages de Stripe. Détenir ces données imposerait la
+> conformité PCI-DSS et ferait porter le risque d'une fuite à l'éditeur, pour
+> un service que Stripe rend déjà.
+
+Un e-mail ou un téléphone déjà enregistré ne peut pas resservir — y compris
+déguisé (casse différente, alias `+tag`, téléphone au format international) :
+c'est ce qui empêche de rouvrir un essai indéfiniment.
+
+| Formule | Prix |
+|---|---|
+| Pro mensuel | **78,79 €** / mois |
+| Pro annuel | **849,99 €** / an |
+
+Le paiement passe par Stripe. **Rien de ce qui vient du navigateur ne vaut
+preuve de paiement** : seul un webhook Stripe *signé* (`STRIPE_WEBHOOK_SECRET`)
+ou une relecture de session via l'API (`STRIPE_SECRET_KEY`) ouvre les droits,
+et la formule est déduite du **montant réellement encaissé**. Sans ces
+secrets, aucun paiement ne peut être confirmé et l'application le dit.
+
+⚠️ Les liens de paiement livrés pointent vers l'environnement **de test** de
+Stripe. Les remplacer par les liens de production dans
+`python/licence/config.py` avant toute mise en vente.
+
 ## Version d'essai et version Pro
 
-L'application se distribue en deux niveaux. Le détail complet — limites,
-comparatif et mode d'abonnement — est dans
+Pendant l'essai, l'application est utilisable mais bridée. Le détail complet —
+limites, comparatif, états du compte et mode d'abonnement — est dans
 [`RELEASE_NOTES_TRIAL.md`](RELEASE_NOTES_TRIAL.md).
 
 | | Essai | Pro |
@@ -260,8 +292,10 @@ d'environnement de l'hébergeur — sans toucher une ligne de code.
 ```
 ├── python/
 │   ├── agents/            46 agents IA + 46 assistants (préparation/vérification)
-│   ├── licence/           offre Essai / Pro — LE point de passage des limites
-│   │   ├── config.py          SOURCE UNIQUE des limites (6 agents, 20/jour…)
+│   ├── licence/           comptes, offre Essai / Pro, abonnement
+│   │   ├── config.py          SOURCE UNIQUE des limites et des tarifs
+│   │   ├── comptes.py         comptes utilisateurs, essai 3 j, sessions
+│   │   ├── stripe_paiement.py vérification des paiements (webhook signé)
 │   │   ├── gate.py            feature gate : agents, quotas, fonctionnalités
 │   │   ├── abonnement.py      état de licence, activation, identité du compte
 │   │   ├── verification.py    licence signée Ed25519 (clé PUBLIQUE embarquée)
@@ -283,9 +317,9 @@ d'environnement de l'hébergeur — sans toucher une ligne de code.
 │   │   ├── version.py         version unique (lue du fichier VERSION)
 │   │   ├── mise_a_jour.py     socle de mise à jour (désactivé par défaut)
 │   │   └── database.py        SQLite (signaux, ordres, portefeuille)
-│   └── tests/             suite de tests (13 modules) — python python/tests/run_tests.py
+│   └── tests/             suite de tests (14 modules) — python python/tests/run_tests.py
 ├── backend/main.py        API FastAPI + pages login/setup
-├── backend/routes/licence.py  routes de l'offre et de l'abonnement
+├── backend/routes/           licence, comptes, abonnement (routes dédiées)
 ├── frontend/              tableau de bord (PWA installable)
 ├── android/               application Android native (WebView)
 ├── tools/
@@ -584,12 +618,22 @@ un tableau de bord par ailleurs fonctionnel. Même principe pour
 `/api/ia/{statut,moteur}` `/api/ollama/*` `/api/hermes/*` `/api/diagnostic`
 `/api/backtest` `/api/performance[/reel]` `/api/mt5/trades`
 `/api/notifications/*` `/api/rapport/test` `/api/mise-a-jour`
-`/api/licence[/offre,/activer,/rafraichir,/desactiver]` —
+`/api/licence[/offre,/activer,/rafraichir,/desactiver]`
+`/api/compte[/inscription,/connexion,/deconnexion,/disponible]`
+`/api/abonnement[/formules,/verifier,/retour,/webhook]` —
 documentation interactive sur `/docs` (après connexion).
 
-Les routes réservées à l'abonnement répondent **402** avec le corps
-`{"pro_requis": true, "feature": …, "store_url": …}` ; un quota d'essai
-atteint répond **429**, même corps. L'interface n'a qu'un cas à traiter.
+Trois refus normalisés, que l'interface traduit en trois écrans :
+
+| Code | Corps | Écran |
+|---|---|---|
+| **401** | `{"compte_requis": true}` | inscription / connexion |
+| **402** | `{"abonnement_requis": true}` | mur de paiement (essai écoulé) |
+| **402** | `{"pro_requis": true, "feature": …}` | « fonctionnalité Pro » |
+| **429** | `{"quota_depasse": true}` | quota d'essai atteint |
+
+Seules `/api/health`, `/api/licence`, `/api/compte/*` et `/api/abonnement/*`
+restent ouvertes sans session — un compte suspendu doit pouvoir régulariser.
 
 ## Tests
 
