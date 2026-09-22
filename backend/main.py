@@ -119,9 +119,30 @@ app = FastAPI(
     version=APP_VERSION,
 )
 
+def _origines_autorisees() -> list:
+    """Origines acceptées en CORS.
+
+    Par défaut « * » : l'application est conçue pour être ouverte depuis
+    n'importe quel appareil du réseau local (téléphone du même Wi-Fi), dont
+    l'adresse n'est pas connue à l'avance. `allow_credentials` restant à False,
+    aucun site tiers ne peut agir AU NOM d'un utilisateur connecté — le cookie
+    de session n'est jamais joint à une requête d'origine étrangère.
+
+    Sur un serveur public, restreindre reste préférable :
+
+        AGENCE_CORS_ORIGINS=https://agence.mondomaine.fr
+
+    (plusieurs origines séparées par des virgules). Voir DEPLOIEMENT.md.
+    """
+    brut = (os.getenv("AGENCE_CORS_ORIGINS", "") or "").strip()
+    if not brut or brut == "*":
+        return ["*"]
+    return [o.strip() for o in brut.split(",") if o.strip()]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origines_autorisees(),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],

@@ -166,6 +166,16 @@ secrets, aucun paiement ne peut être confirmé et l'application le dit.
 Stripe. Les remplacer par les liens de production dans
 `python/licence/config.py` avant toute mise en vente.
 
+**Mise en ligne sur votre serveur** (Stripe, webhook, HTTPS, systemd, nginx,
+sauvegardes) : [`DEPLOIEMENT.md`](DEPLOIEMENT.md).
+
+> ⚠️ **Un serveur = un utilisateur.** Les comptes gèrent l'accès et la
+> facturation, mais le portefeuille, le Chef d'Orchestre et la connexion
+> MetaTrader 5 sont des singletons **partagés par tout le processus** : sur une
+> instance unique, tous les comptes verraient le même portefeuille et le même
+> compte courtier. Pour plusieurs clients, prévoir une instance par client, ou
+> le montage « licence signée » décrit dans `DEPLOIEMENT.md`.
+
 ## Version d'essai et version Pro
 
 Pendant l'essai, l'application est utilisable mais bridée. Le détail complet —

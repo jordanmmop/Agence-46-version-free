@@ -9,6 +9,7 @@ de session dans le corps (il part en cookie `HttpOnly`, inaccessible au
 JavaScript, donc à une éventuelle injection).
 """
 import logging
+import os
 from typing import Any, Dict
 
 from fastapi import APIRouter, Body, Request, Response
@@ -22,22 +23,50 @@ def _ip(request: Request) -> str:
     return getattr(getattr(request, "client", None), "host", "") or "?"
 
 
-def poser_cookie(reponse: Response, jeton: str) -> None:
+def cookie_secure(request: Request = None) -> bool:
+    """Le cookie de session doit-il porter le drapeau `Secure` ?
+
+    `Secure` interdit au navigateur d'envoyer le cookie sur une connexion non
+    chiffrée. Sur un serveur public, c'est indispensable : sans lui, une seule
+    requête en http:// (un signet, une redirection, un lien) suffit à exposer
+    le jeton de session en clair sur le réseau.
+
+    Mais le poser en HTTP simple rendrait la connexion IMPOSSIBLE — or
+    l'application est aussi servie en http:// sur le réseau local (accès
+    depuis un téléphone du même Wi-Fi, cf. README). On décide donc d'après le
+    schéma RÉEL de la requête, avec possibilité de forcer :
+
+        AGENCE_COOKIE_SECURE=1   toujours (serveur public en HTTPS)
+        AGENCE_COOKIE_SECURE=0   jamais (réseau local, mise au point)
+        absent                   auto : `Secure` si la requête est en https
+
+    ⚠️ Derrière un reverse-proxy, l'auto-détection n'est juste QUE si uvicorn
+    reçoit les en-têtes du proxy (`--proxy-headers --forwarded-allow-ips=…`).
+    Sinon, forcez à 1. Voir DEPLOIEMENT.md.
+    """
+    forcage = (os.getenv("AGENCE_COOKIE_SECURE", "") or "").strip().lower()
+    if forcage in ("1", "true", "oui", "yes", "on"):
+        return True
+    if forcage in ("0", "false", "non", "no", "off"):
+        return False
+    return bool(request is not None and request.url.scheme == "https")
+
+
+def poser_cookie(reponse: Response, jeton: str, request: Request = None) -> None:
     """Installe le cookie de session.
 
     `httponly` : le jeton n'est jamais lisible en JavaScript — une faille XSS
     ne permet donc pas de le voler.
     `samesite=lax` : un autre site ne peut pas déclencher d'action authentifiée
     en faisant cliquer l'utilisateur sur un lien.
-    `secure` n'est PAS posé : l'application est servie en HTTP sur le réseau
-    local (accès depuis un téléphone du même Wi-Fi, cf. README). Le poser
-    empêcherait toute connexion. Derrière un reverse-proxy HTTPS, l'activer.
+    `secure` : voir `cookie_secure()`.
     """
     from licence import comptes, config as lconfig
     reponse.set_cookie(
         comptes.COOKIE_SESSION, jeton,
         max_age=lconfig.SESSION_DUREE_JOURS * 86400,
         httponly=True, samesite="lax", path="/",
+        secure=cookie_secure(request),
     )
 
 
@@ -74,7 +103,7 @@ async def inscription(response: Response, request: Request,
         return {"success": False, "error": str(e), "code": e.code}
 
     jeton = comptes.ouvrir_session(compte["id"])
-    poser_cookie(response, jeton)
+    poser_cookie(response, jeton, request)
     comptes.definir_compte_courant(compte)
     comptes.reinitialiser_echecs(_ip(request))
     return {"success": True, **_etat_complet()}
@@ -101,7 +130,7 @@ async def connexion(response: Response, request: Request,
 
     comptes.reinitialiser_echecs(ip)
     jeton = comptes.ouvrir_session(compte["id"])
-    poser_cookie(response, jeton)
+    poser_cookie(response, jeton, request)
     comptes.definir_compte_courant(compte)
     return {"success": True, **_etat_complet()}
 

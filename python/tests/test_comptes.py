@@ -14,6 +14,7 @@ Ce que la suite vérifie :
 - aucun numéro de carte n'entre dans l'application ni dans sa base.
 """
 import _setup  # noqa: F401
+import itertools
 import json
 import os
 import tempfile
@@ -466,6 +467,80 @@ def test_liens_de_paiement_exacts():
     print("  OK — liens Stripe et tarifs conformes")
 
 
+def test_cookie_secure_selon_le_transport():
+    """Le cookie de session ne doit jamais circuler en clair sur un serveur
+    public — ni bloquer la connexion sur le réseau local en HTTP."""
+    _isoler()
+    import sys
+    sys.path.insert(0, str(_RACINE))
+    from fastapi.testclient import TestClient
+    from backend.main import app
+
+    compteur = itertools.count(1)
+
+    def cookie(schema, forcage):
+        if forcage is None:
+            os.environ.pop("AGENCE_COOKIE_SECURE", None)
+        else:
+            os.environ["AGENCE_COOKIE_SECURE"] = forcage
+        c = TestClient(app, base_url=f"{schema}://testserver",
+                       raise_server_exceptions=False)
+        # Contact unique à CHAQUE appel, même pour un couple (schéma, forçage)
+        # déjà vu : une seconde inscription avec le même contact est refusée
+        # (409) et ne pose aucun cookie — le test mesurerait alors une chaîne
+        # vide au lieu de l'en-tête.
+        n = next(compteur)
+        corps = dict(_INSCRIPTION)
+        corps["email"] = f"cookie-{n}@exemple.fr"
+        corps["telephone"] = f"07{n:08d}"
+        reponse = c.post("/api/compte/inscription", json=corps)
+        assert reponse.status_code == 200, reponse.text
+        return reponse.headers.get("set-cookie", "")
+
+    try:
+        assert "Secure" not in cookie("http", None), \
+            "Secure posé en HTTP : la connexion serait impossible sur le réseau local"
+        assert "Secure" in cookie("https", None), \
+            "Secure absent en HTTPS : le jeton de session pourrait fuiter en clair"
+        assert "Secure" in cookie("http", "1"), "forçage à 1 ignoré"
+        assert "Secure" not in cookie("https", "0"), "forçage à 0 ignoré"
+        # Et le reste des protections tient dans tous les cas.
+        entete = cookie("https", None)
+        assert "HttpOnly" in entete and "SameSite=lax" in entete.replace("Lax", "lax")
+    finally:
+        os.environ.pop("AGENCE_COOKIE_SECURE", None)
+    print("  OK — cookie Secure : auto selon le transport, forçable, HttpOnly")
+
+
+def test_origines_cors_restreignables():
+    """Sur un serveur public, on doit pouvoir limiter les origines."""
+    import backend.main as bm
+    try:
+        os.environ.pop("AGENCE_CORS_ORIGINS", None)
+        assert bm._origines_autorisees() == ["*"], "le défaut réseau local a changé"
+        os.environ["AGENCE_CORS_ORIGINS"] = "https://a.fr, https://b.fr"
+        assert bm._origines_autorisees() == ["https://a.fr", "https://b.fr"]
+    finally:
+        os.environ.pop("AGENCE_CORS_ORIGINS", None)
+    print("  OK — origines CORS restreignables par variable d'environnement")
+
+
+def test_guide_de_deploiement_complet():
+    """Le guide doit nommer TOUT ce sans quoi un paiement n'aboutit pas."""
+    guide = (_RACINE / "DEPLOIEMENT.md").read_text(encoding="utf-8")
+    for element in ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
+                    "/api/abonnement/webhook",
+                    "session_id={CHECKOUT_SESSION_ID}",
+                    "checkout.session.completed", "invoice.paid",
+                    "AGENCE_COOKIE_SECURE", "--proxy-headers",
+                    "X-Forwarded-Proto", "proxy_read_timeout",
+                    "python/licence/config.py"):
+        assert element in guide, f"DEPLOIEMENT.md ne mentionne pas : {element}"
+    # Et il doit avertir du partage de l'état de trading.
+    assert "singletons" in guide.lower() or "PARTAGÉ" in guide
+    print("  OK — guide de déploiement complet (Stripe, proxy, avertissements)")
+
+
 def test_interface_expose_inscription_et_formules():
     frontend = _RACINE / "frontend"
     compte_js = (frontend / "js" / "compte.js").read_text(encoding="utf-8")
@@ -527,6 +602,9 @@ def run():
         test_renouvellement_prolonge_sans_perdre_de_jours()
         test_secrets_stripe_jamais_exposes()
         test_liens_de_paiement_exacts()
+        test_cookie_secure_selon_le_transport()
+        test_origines_cors_restreignables()
+        test_guide_de_deploiement_complet()
         test_interface_expose_inscription_et_formules()
     finally:
         import importlib
