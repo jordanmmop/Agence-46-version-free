@@ -40,7 +40,11 @@ def _arbre_python():
     sont pas les siens. `python/.env` (identifiants, réglages) partait de la
     même façon.
     """
-    exclus_dossiers = {"__pycache__", "data", ".pytest_cache"}
+    # « tests » exclu : la suite n'a rien à faire dans une application
+    # livrée (poids inutile), et surtout elle contient l'outillage qui ÉMET
+    # des licences Pro de test — il ne doit exister que sur une machine de
+    # développement, jamais dans le paquet d'un utilisateur.
+    exclus_dossiers = {"__pycache__", "data", ".pytest_cache", "tests"}
     exclus_fichiers = {".env"}
     fichiers = []
     base = os.path.join(_ROOT, "python")
@@ -78,7 +82,7 @@ else:
 # énumère donc explicitement l'arbre applicatif pour qu'il analyse tout le code
 # réellement chargé (et embarque dotenv, scipy, etc. par transitivité).
 _app_modules = []
-for _pkg in ("agents", "utils", "models", "backend"):
+for _pkg in ("agents", "utils", "models", "licence", "backend"):
     try:
         _app_modules += collect_submodules(_pkg)
     except Exception:
@@ -93,6 +97,16 @@ hiddenimports = _app_modules + [
     # Application (chargée par chaîne via uvicorn.run)
     "backend.main",
     "config",
+    # Licence / abonnement : la porte qui applique les limites de la version
+    # d'essai. Oubliée du paquet, l'application démarrerait sans AUCUNE
+    # restriction — l'exact inverse de ce qu'on distribue.
+    "licence",
+    "licence.gate",
+    "licence.config",
+    "licence.abonnement",
+    "licence.verification",
+    "licence.quota",
+    "backend.routes.licence",
     # Dépendances tierces chargées par les agents / config (invisibles à
     # l'analyse statique car atteintes via l'arbre applicatif ci-dessus)
     "dotenv",

@@ -29,3 +29,48 @@ try:
     )
 except Exception:                       # suite lancée hors arborescence python/
     pass
+
+# ── Licence Pro DE TEST ────────────────────────────────────────────────────
+# La suite historique exerce l'application COMPLÈTE : trading automatique,
+# backtest, pré-vol, réglages avancés. Toutes ces fonctionnalités sont
+# désormais réservées à l'abonnement Pro, et répondraient 402 en version
+# d'essai — la suite mesurerait alors le verrou, plus le comportement qu'elle
+# vérifie. Elle tourne donc sous une licence Pro ÉPHÉMÈRE, émise ici.
+#
+# Ce n'est PAS un contournement livré avec le produit :
+#   - la paire de clés naît à chaque exécution et meurt avec le processus ;
+#   - la clé publique n'est posée que dans l'environnement du test ;
+#   - `agence.spec` exclut `python/tests/` du paquet distribué, donc ce code
+#     n'existe sur aucune machine d'utilisateur.
+#
+# `test_licence.py` retire cette licence pour chacun de ses cas : c'est lui qui
+# vérifie que la version d'essai est bien bridée.
+def _licence_pro_de_test() -> None:
+    import json
+    import os
+    import time
+
+    if os.getenv("AGENCE_TESTS_SANS_LICENCE"):      # échappatoire de mise au point
+        return
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives import serialization
+        from licence.verification import b64e
+    except Exception:
+        return                                       # suite lancée hors arborescence
+
+    prive = Ed25519PrivateKey.generate()
+    os.environ["AGENCE_LICENCE_PUBKEY"] = prive.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
+    charge = b64e(json.dumps({
+        "sub": "suite-de-tests", "plan": "PRO", "iss": "agence46",
+        "iat": int(time.time()), "exp": int(time.time() + 3600),
+    }).encode())
+    os.environ["AGENCE_LICENCE_JETON"] = \
+        f"AGENCE1.{charge}.{b64e(prive.sign(charge.encode('ascii')))}"
+
+
+try:
+    _licence_pro_de_test()
+except Exception:                                    # ne doit jamais bloquer la suite
+    pass

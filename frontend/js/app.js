@@ -105,6 +105,20 @@ async function fetchJSON(url, opts = {}) {
   try {
     const r = await fetch(API + url, opts);
     if (r.status === 401) { _authRedirect(); return null; }
+    // 402 = fonctionnalité réservée à la version Pro, 429 = quota d'essai
+    // atteint. Un SEUL endroit traduit ces refus, pour que chaque appel gardé
+    // affiche le même message sans que l'appelant ait à s'en occuper.
+    if (r.status === 402 || r.status === 429) {
+      const body = await r.json().catch(() => ({}));
+      const infos = (body && body.pro_requis) ? body
+                  : (body && body.detail && body.detail.pro_requis) ? body.detail : null;
+      if (infos && typeof window.licenceVerrou === 'function') {
+        window.licenceVerrou(infos);
+        // Les quotas ont pu changer : remettre le compteur de l'en-tête à jour.
+        if (typeof window.licenceCharger === 'function') window.licenceCharger(false);
+        return null;
+      }
+    }
     if (!r.ok) {
       // Lire le body erreur pour un meilleur message
       const errBody = await r.json().catch(() => ({}));
@@ -416,6 +430,11 @@ async function chargerStatus() {
     ? `${data.nb_total} Agents + ${data.nb_assistants} Assistants`
     : `${data.nb_total} Agents`;
   document.getElementById('cycle-chip').textContent   = `Cycle #${data.orchestrateur?.nb_cycles || 0}`;
+  // /api/status transporte l'offre en cours : badge et compteur de requêtes
+  // se mettent à jour sans requête supplémentaire.
+  if (data.licence && typeof window.licenceAppliquer === 'function') {
+    window.licenceAppliquer(data.licence);
+  }
   if (data.orchestrateur)            renderOrchestrateurCard(data.orchestrateur);
   if (data.orchestrateur?.portfolio) updatePortfolio(data.orchestrateur.portfolio);
   // Le serveur répond, mais amputé d'une partie de son état : le dire, avec
@@ -466,6 +485,9 @@ function updatePortfolio(p) {
 async function chargerAgents() {
   agentsData = await fetchJSON('/api/agents');
   if (!agentsData) return;
+  if (agentsData.licence && typeof window.licenceAppliquer === 'function') {
+    window.licenceAppliquer(agentsData.licence);
+  }
   renderGroupeTabs();
   renderAgents(groupeActif);
 }
@@ -523,8 +545,16 @@ function renderAgents(groupe) {
     const astLine = ast
       ? `<div class="agent-assistant" title="${ast.dernier_avis ? esc(ast.dernier_avis) : 'Assistant IA local : prépare les données et vérifie les signaux'}">🤝 ${esc(ast.nom)}${astStats}</div>`
       : '';
+    // Agent hors du périmètre de l'offre : TOUJOURS AFFICHÉ — c'est ce qui
+    // permet de découvrir ce que la version Pro apporte —, mis en retrait et
+    // marqué d'un cadenas. Le serveur seul décide de ce drapeau.
+    const lock = a.verrouille
+      ? '<div class="agent-lock" aria-label="Agent réservé à la version Pro">🔒 PRO</div>'
+      : '';
     return `
-      <div class="agent-card ${actClass} groupe-${a.groupe || 'other'}">
+      <div class="agent-card ${actClass} groupe-${a.groupe || 'other'}${a.verrouille ? ' verrouille' : ''}"
+           ${a.verrouille ? `data-verrou-id="${esc(a.id || '')}" data-verrou-nom="${esc(a.nom || '')}" role="button" tabindex="0"` : ''}>
+        ${lock}
         <div class="agent-header">
           <div class="agent-status-dot"></div>
           <span class="agent-id">${esc(a.id || '')}</span>
@@ -536,7 +566,53 @@ function renderAgents(groupe) {
         ${astLine}
       </div>`;
   }).join('');
+
+  // data-* + écouteur, JAMAIS onclick="handler('...')" : même règle que
+  // renderChips() et renderGroupeTabs(). Un nom d'agent interpolé dans un
+  // attribut onclick suffirait à y glisser du code.
+  grid.querySelectorAll('[data-verrou-id]').forEach(carte => {
+    const ouvrir = () => {
+      if (typeof window.licenceAgentVerrouille === 'function') {
+        window.licenceAgentVerrouille(carte.dataset.verrouId, carte.dataset.verrouNom);
+      }
+    };
+    carte.addEventListener('click', ouvrir);
+    carte.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ouvrir(); }
+    });
+  });
+
+  peindreBandeauAgents();
 }
+
+// Bandeau au-dessus de la grille : périmètre de l'offre et accès à Pro.
+// Peint depuis l'état que le serveur a renvoyé avec /api/agents ou
+// /api/status — l'interface n'invente aucun chiffre.
+function peindreBandeauAgents() {
+  const el = document.getElementById('lic-bandeau-agents');
+  if (!el) return;
+  const lic = (agentsData && agentsData.licence)
+    || (typeof window.licenceEtat === 'function' ? window.licenceEtat() : null);
+  if (!lic || !lic.agents) { el.style.display = 'none'; return; }
+
+  el.style.display = '';
+  if (lic.est_pro) {
+    el.innerHTML = `<span><strong>★ Version Pro</strong> — les
+      ${esc(String(lic.agents.total))} agents IA sont actifs.</span>`;
+    return;
+  }
+  el.innerHTML = `<span><strong>${esc(String(lic.agents.autorises))} agents sur
+      ${esc(String(lic.agents.total))}</strong> sont actifs en version d'essai.
+      Les autres restent visibles et se débloquent avec la version Pro.</span>
+    <button class="lic-btn lic-btn-pro" id="lic-bandeau-btn">Passer à Pro</button>`;
+  const btn = document.getElementById('lic-bandeau-btn');
+  if (btn) btn.addEventListener('click', () => window.licencePasserPro && window.licencePasserPro());
+}
+
+// licence.js redessine les agents quand l'offre change (activation, expiration).
+window.licenceRafraichirAgents = function () {
+  if (agentsData) renderAgents(groupeActif);
+};
 
 async function chargerSymboles() {
   const data = await fetchJSON('/api/symboles');
@@ -560,7 +636,11 @@ async function lancerAnalyse() {
   const status = document.getElementById('analyse-status');
   btn.disabled    = true;
   btn.textContent = '⏳ Analyse en cours...';
-  status.textContent = `Interrogation de 45 agents sur ${symbolesSel.join(', ')}...`;
+  // Nombre d'agents RÉELLEMENT mobilisés dans l'offre en cours : annoncer 45
+  // alors que 6 travaillent en version d'essai serait un mensonge d'interface.
+  const _lic = (typeof window.licenceEtat === 'function' && window.licenceEtat()) || null;
+  const _nbAgents = _lic && _lic.agents ? _lic.agents.autorises : 45;
+  status.textContent = `Interrogation de ${_nbAgents} agents sur ${symbolesSel.join(', ')}...`;
 
   const progressTimer = showProgress('Analyse en cours...');
 
@@ -579,7 +659,20 @@ async function lancerAnalyse() {
     return;
   }
 
-  status.textContent = `✅ Analyse terminée — Cycle #${data.cycle || '?'}`;
+  // Le serveur renvoie avec chaque rapport les quotas à jour et les symboles
+  // écartés faute d'abonnement : le dire ici, à l'endroit où l'utilisateur
+  // vient de cliquer, plutôt que de le laisser deviner.
+  let _suffixe = '';
+  if (data.licence) {
+    if (typeof window.licenceCharger === 'function') window.licenceCharger(false);
+    const q = data.licence.quotas || {};
+    if (!q.illimite && q.resume) _suffixe += ` · ${q.resume}`;
+    const ecartes = data.licence.symboles_ecartes || [];
+    if (ecartes.length) {
+      _suffixe += ` · ${ecartes.length} symbole(s) écarté(s) — version Pro requise`;
+    }
+  }
+  status.textContent = `✅ Analyse terminée — Cycle #${data.cycle || '?'}${_suffixe}`;
   renderDecisions(data.decisions || {});
   if (data.portfolio) updatePortfolio(data.portfolio);
   document.getElementById('cycle-chip').textContent = `Cycle #${data.cycle || '?'}`;

@@ -86,12 +86,35 @@ class ChefOrchestre:
         ], timeout=SYNTHESE_TIMEOUT)
         return texte or self._consensus_textuel(signaux, direction, prix)
 
+    @staticmethod
+    def _agents_du_cycle(tous: list) -> tuple:
+        """(agents qui participent au cycle, nombre d'agents verrouillés).
+
+        SEUL endroit où le nombre d'agents d'un cycle est décidé : la règle
+        elle-même vit dans `licence/gate.py`, qui lit `licence/config.py`.
+        Les agents verrouillés ne sont ni supprimés ni détruits — ils restent
+        instanciés et visibles dans l'interface, ils ne sont simplement pas
+        interrogés. Si la couche licence est indisponible (arborescence
+        partielle, import cassé), le cycle tourne AVEC TOUS LES AGENTS :
+        dégrader vers « plus de restriction » casserait l'application d'un
+        abonné, ce qui est pire que de ne pas restreindre un essai.
+        """
+        try:
+            from licence import gate
+            permis = gate.agents_autorises(tous)
+        except Exception as e:
+            logger.warning(f"[licence] Périmètre d'agents indéterminable ({e}) — cycle complet")
+            return list(tous), 0
+        return permis, max(0, len(tous) - len(permis))
+
     def orchestrer(self, symboles: List[str] = None) -> Dict[str, Any]:
         from . import TOUS_LES_AGENTS
 
         if symboles is None:
             from config import SYMBOLES_DEFAULT
             symboles = SYMBOLES_DEFAULT[:3]
+
+        agents_actifs, nb_verrouilles = self._agents_du_cycle(TOUS_LES_AGENTS)
 
         # Un seul cycle mute l'état à la fois (voir _orch_lock). Un appel
         # concurrent attend la fin du cycle en cours plutôt que de corrompre
@@ -100,18 +123,25 @@ class ChefOrchestre:
             self.statut = "orchestration"
             self.derniere_analyse = datetime.now()
             self.nb_cycles += 1
-            logger.info(f"[{self.NOM}] Cycle {self.nb_cycles} - Analyse de {len(symboles)} symboles")
+            logger.info(f"[{self.NOM}] Cycle {self.nb_cycles} - Analyse de {len(symboles)} symboles "
+                        f"avec {len(agents_actifs)}/{len(TOUS_LES_AGENTS)} agents")
 
             resultats = {}
             for symbole in symboles:
                 logger.info(f"  Analyse {symbole}...")
                 donnees = self._preparer_donnees(symbole)
-                signaux_agents = self._collecter_signaux(symbole, donnees, TOUS_LES_AGENTS)
+                signaux_agents = self._collecter_signaux(symbole, donnees, agents_actifs)
                 decision = self._prendre_decision(symbole, signaux_agents, donnees)
                 resultats[symbole] = decision
                 self.db.sauver_signal(decision["signal_final"].to_dict())
 
             rapport = self._generer_rapport(resultats)
+            # Le rapport dit avec COMBIEN d'agents il a été produit : sans
+            # cela, un cycle d'essai et un cycle Pro seraient indiscernables
+            # dans l'historique et dans l'interface.
+            rapport["agents_actifs"] = len(agents_actifs)
+            rapport["agents_total"] = len(TOUS_LES_AGENTS)
+            rapport["agents_verrouilles"] = nb_verrouilles
             self.historique_decisions.append(rapport)
             if len(self.historique_decisions) > 50:
                 self.historique_decisions = self.historique_decisions[-50:]
@@ -342,6 +372,9 @@ class ChefOrchestre:
             "nb_cycles": self.nb_cycles,
             "derniere_analyse": self.derniere_analyse.isoformat() if self.derniere_analyse else None,
             "nb_agents": len(TOUS_LES_AGENTS),
+            # Agents réellement mobilisés dans l'offre en cours : l'interface
+            # affiche « 6 / 45 » en essai et « 45 / 45 » en Pro.
+            "nb_agents_actifs": len(self._agents_du_cycle(TOUS_LES_AGENTS)[0]),
             "portfolio": self.portfolio.to_dict(),
             "assistant": self.assistant.to_dict(),
         }

@@ -12,6 +12,10 @@ requests>=2.32.0
 certifi>=2024.2.2
 truststore>=0.9.1 ; python_version >= "3.10"
 python-dotenv>=1.0.0
+# Vérification de la signature Ed25519 des licences Pro (python/licence/).
+# Absente, aucune licence ne peut être vérifiée : l'application reste en
+# version d'essai (échec fermé, voir licence/verification.py).
+cryptography>=41.0.0
 aiohttp>=3.10.0
 websockets>=13.0
 pydantic>=2.9.0

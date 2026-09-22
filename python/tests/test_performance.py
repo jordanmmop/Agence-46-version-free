@@ -576,6 +576,22 @@ def test_api_performance():
 
 def run():
     print("═══ Moteur de performance ═══")
+    # Chaque cas détourne app_config vers un fichier temporaire (_isoler_config)
+    # et ne le remettait JAMAIS en place : le module suivant héritait d'une
+    # configuration pointant sur /tmp. C'est ce qui faisait échouer
+    # test_msix.test_donnees_utilisateur_hors_du_paquet — lequel vérifie
+    # précisément que la configuration vit dans ~/.agence_financiere — pour une
+    # raison sans aucun rapport avec l'empaquetage. Même discipline que
+    # test_features.run().
+    from utils import app_config
+    _path0, _cache0 = app_config._PATH, app_config._cache
+    try:
+        _executer()
+    finally:
+        app_config._PATH, app_config._cache = _path0, _cache0
+
+
+def _executer():
     test_bornes_et_tout_ou_rien()
     test_levier_agents()
     test_volume_au_levier()

@@ -113,6 +113,12 @@
         Accéder au tableau de bord →
       </button>
     </div>
+
+    <!-- Offre en cours, dès l'écran de lancement : l'utilisateur sait ce
+         qu'il ouvre avant de l'ouvrir. Rempli par js/licence.js — masqué tant
+         que le serveur n'a pas répondu, pour ne jamais annoncer une offre
+         qui se révélerait fausse. -->
+    <div class="launch-licence" id="launch-licence" style="display:none"></div>
   </div>
 </div>
 
@@ -134,6 +140,12 @@
       <div class="header-stats">
         <div class="stat-chip" id="statut-chip">⚡ Chargement...</div>
         <div class="stat-chip" id="agents-chip">46 Agents</div>
+        <!-- Offre en cours : badge « VERSION D'ESSAI » ou « ★ PRO », et
+             compteur de requêtes restantes. Remplis par js/licence.js depuis
+             la réponse du serveur — jamais depuis l'état du navigateur. -->
+        <div class="stat-chip licence-chip" id="licence-chip" role="button" tabindex="0"
+             title="Offre en cours">—</div>
+        <div class="stat-chip" id="licence-quota" style="display:none"></div>
         <div class="stat-chip" id="cycle-chip">Cycle #0</div>
         <div class="stat-chip chip-refresh" id="refresh-chip" title="Rafraîchissement auto toutes les 30s">
           <span class="refresh-arc" id="refresh-arc"></span>
@@ -243,6 +255,9 @@
     <!-- Agents -->
     <section class="card card-agents">
       <h2>Les 46 agents</h2>
+      <!-- Périmètre de l'offre + accès à la version Pro. Rempli par
+           js/licence.js ; masqué tant que le serveur n'a pas répondu. -->
+      <div class="lic-bandeau" id="lic-bandeau-agents" style="display:none"></div>
       <div class="groupe-tabs" id="groupe-tabs"></div>
       <div id="agents-grid" class="agents-grid"></div>
     </section>
@@ -518,6 +533,7 @@
 <script src="js/mt5.js"></script>
 <script src="js/auto_trader.js"></script>
 <script src="js/charts.js"></script>
+<script src="js/licence.js"></script>
 <script src="js/tools.js"></script>
 <script>
   // Afficher la bannière sur iOS si pas encore installé et pas encore fermée
