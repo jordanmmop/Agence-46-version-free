@@ -92,6 +92,17 @@ def normaliser_telephone(brut: str) -> str:
 _CLE_TEL_LONGUEUR = 9
 
 
+# Indicatifs pays retirés quand le numéro est écrit en INTERNATIONAL (« + » ou
+# « 00 » de tête). Essayés du plus long au plus court : « 352 » (Luxembourg)
+# avant « 35 », sinon on tronquerait au mauvais endroit.
+_INDICATIFS_PAYS = (
+    "262", "352", "377", "590", "594", "596", "262",   # France d'outre-mer, Lux., Monaco
+    "351", "353", "356", "358", "359", "370", "371", "372", "385", "386", "420", "421",
+    "30", "31", "32", "33", "34", "36", "39", "40", "41", "43", "44", "45", "46", "47",
+    "48", "49", "1", "7",
+)
+
+
 def cle_telephone(brut: str) -> str:
     """Clé d'UNICITÉ d'un téléphone — insensible à la forme d'écriture.
 
@@ -101,16 +112,45 @@ def cle_telephone(brut: str) -> str:
     il suffisait donc d'écrire son numéro au format international pour se
     réinscrire et repartir pour trois jours d'essai.
 
-    On compare donc les derniers chiffres significatifs, après avoir retiré
-    l'indicatif pays éventuel et le zéro national de tête. Deux lignes de pays
-    différents partageant ces neuf chiffres seraient confondues : c'est
+    Deux règles, dans cet ordre :
+
+    1. Numéro écrit en INTERNATIONAL (« + » ou « 00 » de tête) : on sait avec
+       certitude que les premiers chiffres sont un indicatif pays, on le
+       retire. C'est exact, et non heuristique.
+    2. Sinon : on garde les derniers chiffres significatifs, après le zéro
+       national de tête.
+
+    La règle 1 a été ajoutée parce que la règle 2 seule se désaligne dès que la
+    partie nationale fait MOINS de neuf chiffres : « 012345678 » donne alors
+    « 12345678 », et « +33 12345678 » donne « 312345678 » — deux clés pour une
+    seule ligne, donc un second essai de trois jours à qui écrit son numéro
+    autrement. Les numéros français (neuf chiffres significatifs) n'étaient pas
+    touchés, mais on ne vend pas qu'en France.
+
+    LIMITE CONNUE : pour un numéro NATIONAL d'un pays dont l'indicatif n'est
+    pas dans `_INDICATIFS_PAYS`, on retombe sur la règle 2. Deux lignes de pays
+    différents partageant ces neuf chiffres seraient alors confondues : c'est
     improbable, et le refus d'une inscription se lève par un message au
     support — l'inverse (un essai rouvert à volonté) ne se rattrape pas.
     """
-    chiffres = re.sub(r"\D", "", brut or "")
+    brut = (brut or "").strip()
+    chiffres = re.sub(r"\D", "", brut)
     if not chiffres:
         return ""
-    chiffres = chiffres.lstrip("0")            # zéro national ou « 00 » d'entête
+
+    international = brut.startswith("+") or chiffres.startswith("00")
+    if chiffres.startswith("00"):
+        chiffres = chiffres[2:]
+
+    if international:
+        for indicatif in sorted(_INDICATIFS_PAYS, key=len, reverse=True):
+            if chiffres.startswith(indicatif) and len(chiffres) - len(indicatif) >= 6:
+                # Certains plans gardent un zéro « de courtoisie » après
+                # l'indicatif (« +33 0 6 … ») : il n'appartient pas au numéro.
+                return chiffres[len(indicatif):].lstrip("0") or chiffres
+        # Indicatif inconnu : on retombe sur la règle 2.
+
+    chiffres = chiffres.lstrip("0")            # zéro national de tête
     return chiffres[-_CLE_TEL_LONGUEUR:] if chiffres else ""
 
 
@@ -208,6 +248,17 @@ def verifier_mot_de_passe(mot: str, stocke: str) -> bool:
 
 
 # ═══════════════════════════ DÉPÔT (stockage) ═════════════════════════════
+
+class ContactDejaUtilise(Exception):
+    """Un e-mail ou un téléphone est déjà rattaché à un compte.
+
+    Levée par le DÉPÔT, quel que soit son moteur : c'est ce qui permet à
+    `inscrire()` de traiter le cas sans savoir si le stockage est un fichier
+    SQLite local ou une base PostgreSQL distante. Auparavant l'appelant
+    attrapait `sqlite3.IntegrityError` — un détail de moteur qui aurait rendu
+    l'erreur invisible sur toute autre base.
+    """
+
 
 class DepotComptes:
     """Accès au stockage des comptes. SEULE classe qui connaît SQLite.
@@ -315,12 +366,15 @@ class DepotComptes:
 
     # ── Écritures ──
     def creer(self, compte: Dict[str, Any]) -> None:
-        """Lève sqlite3.IntegrityError si l'e-mail ou le téléphone existe."""
+        """Lève `ContactDejaUtilise` si l'e-mail ou le téléphone existe déjà."""
         colonnes = ", ".join(compte)
         marques = ", ".join("?" * len(compte))
-        with self._conn() as c:
-            c.execute(f"INSERT INTO comptes ({colonnes}) VALUES ({marques})",
-                      tuple(compte.values()))
+        try:
+            with self._conn() as c:
+                c.execute(f"INSERT INTO comptes ({colonnes}) VALUES ({marques})",
+                          tuple(compte.values()))
+        except sqlite3.IntegrityError as e:
+            raise ContactDejaUtilise(str(e)) from e
 
     def modifier(self, compte_id: str, **champs) -> None:
         if not champs:
@@ -354,11 +408,58 @@ class DepotComptes:
             c.execute("DELETE FROM comptes_sessions WHERE compte_id = ?", (compte_id,))
 
 
-_depot = DepotComptes()
+# Dépôt effectivement utilisé. Construit au PREMIER appel de `depot()` et non
+# à l'import : la suite de tests redirige la base en cours d'exécution, et un
+# dépôt figé à l'import écrirait dans la base de la machine.
+_depot = None
+_depot_lock = threading.Lock()
 
 
-def depot() -> DepotComptes:
-    return _depot
+def depot():
+    """Le dépôt de comptes à utiliser — SQLite local ou base distante.
+
+    Le choix se fait sur la seule présence de `AGENCE_COMPTES_DSN` :
+
+        absent    → SQLite, dans la base de l'application (défaut).
+                    Convient à une installation de bureau : les comptes vivent
+                    sur la machine de leur propriétaire.
+        présent   → PostgreSQL à l'adresse indiquée. Les comptes sont alors
+                    CENTRAUX : ils suivent leur propriétaire d'un appareil à
+                    l'autre et survivent à une réinstallation.
+
+    Si la base distante est inaccessible au démarrage, on NE RETOMBE PAS sur
+    SQLite : ce serait créer en silence un second jeu de comptes, local celui-là,
+    avec des essais de 3 jours neufs et des abonnements introuvables. Mieux vaut
+    une erreur franche qu'une base fantôme.
+    """
+    global _depot
+    if _depot is not None:
+        return _depot
+    with _depot_lock:
+        if _depot is not None:
+            return _depot
+        from licence import depot_postgres
+        dsn = depot_postgres.dsn_configure()
+        if dsn:
+            _depot = depot_postgres.DepotPostgres(dsn)
+            logger.info("[comptes] Comptes centralisés sur %s",
+                        _depot.diagnostic().get("hote", "?"))
+        else:
+            _depot = DepotComptes()
+        return _depot
+
+
+def reinitialiser_depot() -> None:
+    """Oublie le dépôt construit. Utilisé par la suite de tests, qui change de
+    base en cours d'exécution, et après un changement de configuration."""
+    global _depot
+    with _depot_lock:
+        if _depot is not None and hasattr(_depot, "fermer"):
+            try:
+                _depot.fermer()
+            except Exception:
+                pass
+        _depot = None
 
 
 # ═══════════════════════════ CYCLE DE VIE DU COMPTE ═══════════════════════
@@ -395,7 +496,7 @@ def _synchroniser_etat(compte: Dict[str, Any]) -> EtatLicence:
     etat = etat_du_compte(compte)
     if str(compte.get("etat") or "") != etat.value:
         try:
-            _depot.modifier(compte["id"], etat=etat.value)
+            depot().modifier(compte["id"], etat=etat.value)
             compte["etat"] = etat.value
         except Exception as e:
             logger.warning("[comptes] État non persisté : %s", e)
@@ -463,12 +564,12 @@ def inscrire(donnees: Dict[str, Any]) -> Dict[str, Any]:
     telephone = normaliser_telephone(donnees.get("telephone"))
 
     with _lock:
-        if _depot.par_email(email):
+        if depot().par_email(email):
             raise ErreurCompte(
                 "Un compte existe déjà avec cette adresse e-mail. "
                 "Connectez-vous ou réinitialisez votre mot de passe.",
                 "compte_existant")
-        if _depot.par_telephone(telephone):
+        if depot().par_telephone(telephone):
             raise ErreurCompte(
                 "Un compte existe déjà avec ce numéro de téléphone.",
                 "compte_existant")
@@ -495,8 +596,8 @@ def inscrire(donnees: Dict[str, Any]) -> Dict[str, Any]:
             "derniere_connexion": maintenant,
         }
         try:
-            _depot.creer(compte)
-        except sqlite3.IntegrityError:
+            depot().creer(compte)
+        except ContactDejaUtilise:
             # Deux inscriptions simultanées : l'index UNIQUE a tranché. Le
             # perdant reçoit le même message que s'il avait été second.
             raise ErreurCompte(
@@ -522,10 +623,10 @@ def connecter(email: str, mot_de_passe: str) -> Dict[str, Any]:
     Le message est le MÊME que l'e-mail soit inconnu ou le mot de passe faux :
     distinguer les deux dirait à un inconnu quelles adresses sont inscrites.
     """
-    compte = _depot.par_email(normaliser_email(email))
+    compte = depot().par_email(normaliser_email(email))
     if not compte or not verifier_mot_de_passe(mot_de_passe, compte.get("mot_de_passe", "")):
         raise ErreurCompte("E-mail ou mot de passe incorrect.", "identifiants")
-    _depot.modifier(compte["id"], derniere_connexion=time.time())
+    depot().modifier(compte["id"], derniere_connexion=time.time())
     _synchroniser_etat(compte)
     return compte
 
@@ -539,23 +640,23 @@ def ouvrir_session(compte_id: str) -> str:
     compte. Un jeton signé resterait valable jusqu'à sa date d'expiration.
     """
     jeton = secrets.token_urlsafe(32)
-    _depot.creer_session(jeton, compte_id, lconfig.SESSION_DUREE_JOURS * 86400)
+    depot().creer_session(jeton, compte_id, lconfig.SESSION_DUREE_JOURS * 86400)
     return jeton
 
 
 def fermer_session(jeton: str) -> None:
     if jeton:
-        _depot.supprimer_session(jeton)
+        depot().supprimer_session(jeton)
 
 
 def compte_de_session(jeton: str) -> Optional[Dict[str, Any]]:
     """Compte rattaché à un jeton de session valide, sinon None."""
     if not jeton:
         return None
-    session = _depot.session(jeton)
+    session = depot().session(jeton)
     if not session:
         return None
-    compte = _depot.par_id(session["compte_id"])
+    compte = depot().par_id(session["compte_id"])
     if compte:
         _synchroniser_etat(compte)
     return compte
@@ -579,7 +680,7 @@ def activer_abonnement(compte_id: str, formule: str, reference: str,
     if duree_jours is None:
         duree_jours = lconfig.DUREE_DROITS_JOURS.get(formule, 31)
 
-    compte = _depot.par_id(compte_id)
+    compte = depot().par_id(compte_id)
     if not compte:
         raise ErreurCompte("Compte introuvable.", "compte_introuvable")
 
@@ -588,13 +689,13 @@ def activer_abonnement(compte_id: str, formule: str, reference: str,
     base = max(time.time(), compte.get("abonne_jusqua") or 0)
     jusqua = base + duree_jours * 86400
 
-    _depot.modifier(compte_id, formule=formule, abonne_jusqua=jusqua,
+    depot().modifier(compte_id, formule=formule, abonne_jusqua=jusqua,
                     paiement_ref=str(reference or "")[:200],
                     etat=EtatLicence.PRO_ACTIVE.value)
     logger.info("[comptes] Abonnement %s activé pour %s jusqu'au %s",
                 formule, compte.get("email"),
                 time.strftime("%Y-%m-%d", time.localtime(jusqua)))
-    return _depot.par_id(compte_id)
+    return depot().par_id(compte_id)
 
 
 def suspendre(compte_id: str, raison: str = "") -> None:
@@ -603,8 +704,8 @@ def suspendre(compte_id: str, raison: str = "") -> None:
     Fermer les sessions est le point important : sans cela, un compte suspendu
     resterait utilisable dans l'onglet déjà ouvert jusqu'à sa déconnexion.
     """
-    _depot.modifier(compte_id, etat=EtatLicence.SUSPENDU.value)
-    _depot.supprimer_sessions_du_compte(compte_id)
+    depot().modifier(compte_id, etat=EtatLicence.SUSPENDU.value)
+    depot().supprimer_sessions_du_compte(compte_id)
     logger.info("[comptes] Compte %s suspendu%s", compte_id,
                 f" ({raison})" if raison else "")
 
@@ -616,9 +717,9 @@ def contact_deja_utilise(email: str = "", telephone: str = "") -> bool:
     décision, elle, reste prise par `inscrire()` et par les index UNIQUE :
     une vérification préalable n'est qu'un confort d'affichage.
     """
-    if email and _depot.par_email(normaliser_email(email)):
+    if email and depot().par_email(normaliser_email(email)):
         return True
-    if telephone and _depot.par_telephone(normaliser_telephone(telephone)):
+    if telephone and depot().par_telephone(normaliser_telephone(telephone)):
         return True
     return False
 

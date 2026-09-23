@@ -58,6 +58,108 @@ votre abonnement. Tout fonctionne tel quel, Stripe compris.
 
 ---
 
+## 0 bis. Comptes centralisés sur votre serveur (et le piège IPv6)
+
+Par défaut, les comptes vivent dans le fichier SQLite de la machine qui fait
+tourner l'application. Pour qu'ils vivent sur **votre serveur de base de
+données** — et suivent donc leur propriétaire d'un appareil à l'autre — une
+seule variable suffit :
+
+```ini
+AGENCE_COMPTES_DSN=postgresql://agence:MOTDEPASSE@[2001:41d0:301::21]:5432/agence
+```
+
+Rien d'autre ne change dans l'application : `licence/comptes.py` passe par un
+dépôt, et `licence/depot_postgres.py` en fournit une version PostgreSQL au
+contrat identique (mêmes méthodes, même unicité tenue par des index UNIQUE,
+mêmes sessions révocables).
+
+### ⚠️ Les crochets autour de l'adresse IPv6 ne sont pas optionnels
+
+```
+  ✗  postgresql://agence:mdp@2001:41d0:301::21:5432/agence
+  ✓  postgresql://agence:mdp@[2001:41d0:301::21]:5432/agence
+```
+
+Sans crochets, les deux-points de l'adresse sont lus comme le séparateur du
+port : « 2001 » devient le nom d'hôte. L'application **refuse** désormais ce
+DSN au démarrage en indiquant la correction, plutôt que d'échouer plus tard
+sur un « could not translate host name "2001" » sans rapport apparent.
+
+### TLS imposé vers un hôte distant
+
+La connexion transporte des mots de passe hachés, des jetons de session et des
+identités. Si le DSN ne précise pas `sslmode`, `sslmode=require` est ajouté ;
+un `sslmode=disable` explicite vers une adresse non locale est **refusé**.
+Pour aller plus loin (recommandé), utilisez `sslmode=verify-full` avec le
+certificat de votre serveur PostgreSQL.
+
+### ⚠️⚠️ Stripe ne parle QUE l'IPv4 — votre serveur applicatif a besoin d'IPv4
+
+C'est le point à vérifier avant tout le reste. La documentation Stripe est
+explicite : « *Stripe only supports IPv4 on api.stripe.com. IPv6 isn't
+supported.* » Les quinze adresses d'où partent les webhooks sont toutes des
+adresses IPv4 ([docs.stripe.com/ips](https://docs.stripe.com/ips)).
+
+Conséquence, et elle est nette :
+
+| Ce qui passe par l'IPv6 | Verdict |
+|---|---|
+| Application → base PostgreSQL des comptes | ✅ **sans problème** — c'est votre réseau, de serveur à serveur |
+| Stripe → votre webhook `/api/abonnement/webhook` | ❌ **impossible** en IPv6 seul |
+| Application → `api.stripe.com` (relecture de session) | ❌ **impossible** en IPv6 seul |
+
+Autrement dit : **stocker les comptes sur `2001:41d0:301::21` est parfaitement
+viable**, mais le serveur qui expose l'application doit avoir une **adresse
+IPv4 publique**, un **nom de domaine** et un **certificat TLS valide** — sans
+quoi aucun paiement ne sera jamais confirmé, et les comptes resteront
+suspendus après leurs trois jours d'essai.
+
+Un serveur OVH dispose normalement des deux adresses ; vérifiez la vôtre :
+
+```bash
+curl -4 -s https://api.ipify.org ; echo     # doit répondre une adresse IPv4
+curl -4 -sS -o /dev/null -w '%{http_code}\n' https://api.stripe.com/v1   # 401 = joignable
+```
+
+Un `401` est le bon résultat : l'API répond, elle refuse simplement une
+requête sans clé.
+
+### Installer la base sur votre serveur
+
+```bash
+sudo apt install postgresql
+sudo -u postgres psql -c "CREATE USER agence WITH PASSWORD 'un-mot-de-passe-solide';"
+sudo -u postgres psql -c "CREATE DATABASE agence OWNER agence;"
+```
+
+Pour que PostgreSQL écoute en IPv6 et accepte TLS, dans `postgresql.conf` :
+
+```
+listen_addresses = '2001:41d0:301::21,127.0.0.1'
+ssl = on
+```
+
+et dans `pg_hba.conf`, n'ouvrez **que** ce dont vous avez besoin (`hostssl`,
+jamais `host` nu, qui accepterait une connexion en clair) :
+
+```
+hostssl  agence  agence  2001:41d0:301::21/128  scram-sha-256
+```
+
+Le pilote n'est pas installé par défaut — il ne sert qu'à ce montage :
+
+```bash
+pip install -r python/requirements-serveur.txt
+```
+
+Les tables sont créées automatiquement au premier démarrage.
+
+> **Sauvegardez cette base.** Elle contient désormais **tous les comptes et
+> tous les abonnements** — voir la section 9.
+
+---
+
 ## 1. Prérequis
 
 - Un serveur Linux (Debian/Ubuntu récent), Python **3.11**.

@@ -107,6 +107,7 @@ hiddenimports = _app_modules + [
     "licence.verification",
     "licence.quota",
     "licence.comptes",
+    "licence.depot_postgres",
     "licence.stripe_paiement",
     "backend.routes.licence",
     "backend.routes.comptes",

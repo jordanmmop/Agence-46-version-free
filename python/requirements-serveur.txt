@@ -1,0 +1,13 @@
+# Dépendances SUPPLÉMENTAIRES d'un déploiement serveur avec comptes centralisés.
+#
+# Inutiles pour l'application de bureau : sans elles, les comptes vivent dans
+# le fichier SQLite local, ce qui est le comportement par défaut et voulu.
+# Elles ne sont donc PAS dans python/requirements.txt — le paquet Windows n'a
+# aucune raison d'embarquer un pilote PostgreSQL.
+#
+#     pip install -r python/requirements.txt -r python/requirements-serveur.txt
+#
+# Pilote PostgreSQL + pool de connexions. Le pool n'est pas un confort : sans
+# lui, chaque vérification de session — donc chaque requête HTTP — coûterait
+# une connexion TCP et une poignée de main TLS vers la base.
+psycopg[binary,pool]>=3.1

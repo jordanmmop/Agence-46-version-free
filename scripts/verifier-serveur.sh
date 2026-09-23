@@ -103,6 +103,47 @@ else
     || rouge "cookie SANS Secure : le jeton peut circuler en clair"
 fi
 
+titre "7. Joignabilité IPv4 de Stripe"
+# Stripe ne gère QUE l'IPv4 (docs.stripe.com/ips). Un serveur joignable
+# uniquement en IPv6 ne recevra jamais de webhook et ne pourra pas relire une
+# session de paiement — les comptes resteraient suspendus après leur essai,
+# sans que rien ne l'explique.
+if curl -4 -sS -o /dev/null -m 10 "https://api.stripe.com/v1" 2>/dev/null; then
+  vert "api.stripe.com joignable en IPv4"
+else
+  CODE_S="$(curl -4 -s -o /dev/null -m 10 -w '%{http_code}' "https://api.stripe.com/v1" 2>/dev/null)"
+  if [[ "$CODE_S" =~ ^[0-9]{3}$ && "$CODE_S" != "000" ]]; then
+    vert "api.stripe.com joignable en IPv4 (HTTP $CODE_S)"
+  else
+    rouge "api.stripe.com INJOIGNABLE en IPv4 — aucun paiement ne pourra être"
+    rouge "  confirmé. Stripe ne gère pas l'IPv6 : ce serveur a besoin d'une"
+    rouge "  adresse IPv4 sortante. Voir DEPLOIEMENT.md, section 0 bis."
+  fi
+fi
+
+IPV4_PUB="$(curl -4 -sS -m 10 https://api.ipify.org 2>/dev/null || true)"
+if [[ -n "$IPV4_PUB" ]]; then
+  vert "adresse IPv4 publique : $IPV4_PUB"
+else
+  jaune "adresse IPv4 publique non déterminée — Stripe doit pouvoir ATTEINDRE"
+  jaune "  ce serveur en IPv4 pour livrer ses webhooks"
+fi
+
+titre "8. Stockage des comptes"
+ENV_FICHIER="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/python/.env"
+if [[ -f "$ENV_FICHIER" ]] && grep -q '^AGENCE_COMPTES_DSN=' "$ENV_FICHIER"; then
+  # On n'affiche QUE l'hôte : la ligne contient un mot de passe.
+  HOTE_BASE="$(grep '^AGENCE_COMPTES_DSN=' "$ENV_FICHIER" \
+               | sed -E 's|.*@([^/?]+).*|\1|')"
+  vert "comptes centralisés sur $HOTE_BASE"
+  grep -q '^AGENCE_COMPTES_DSN=.*sslmode=disable' "$ENV_FICHIER" \
+    && rouge "sslmode=disable : la base des comptes circulerait en clair" \
+    || vert "connexion à la base chiffrée (TLS)"
+else
+  jaune "comptes en base SQLite locale — ils ne suivront pas l'utilisateur"
+  jaune "  d'un appareil à l'autre. Voir DEPLOIEMENT.md, section 0 bis."
+fi
+
 titre "Résultat"
 if [[ "$ECHECS" -eq 0 ]]; then
   printf '\033[32m  Aucun problème bloquant.\033[0m\n'

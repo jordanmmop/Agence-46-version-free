@@ -30,6 +30,10 @@ services:
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
+      # Base PostgreSQL des comptes (optionnelle). SECRET : elle porte un
+      # mot de passe, d'où « sync: false ».
+      - key: AGENCE_COMPTES_DSN
+        sync: false
       - key: CAPITAL_INITIAL
         value: "100000"
       - key: BACKEND_HOST

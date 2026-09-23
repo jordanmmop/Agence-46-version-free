@@ -34,7 +34,7 @@ if [[ -f "$ENV_FICHIER" ]]; then
 fi
 
 # ── Clé secrète Stripe ─────────────────────────────────────────────────────
-titre "1/3 — Clé secrète Stripe"
+titre "1/4 — Clé secrète Stripe"
 echo "Stripe → Développeurs → Clés API → clé secrète (commence par « sk_ »)."
 while :; do
   read -r -s -p "  STRIPE_SECRET_KEY : " STRIPE_SECRET_KEY; echo
@@ -51,7 +51,7 @@ while :; do
 done
 
 # ── Secret de signature du webhook ─────────────────────────────────────────
-titre "2/3 — Secret de signature du webhook"
+titre "2/4 — Secret de signature du webhook"
 echo "Stripe → Développeurs → Webhooks → votre endpoint → « Signing secret »."
 echo "L'endpoint à déclarer est :  https://<votre-domaine>/api/abonnement/webhook"
 while :; do
@@ -63,7 +63,7 @@ while :; do
 done
 
 # ── Domaine public ─────────────────────────────────────────────────────────
-titre "3/3 — Domaine public de l'application"
+titre "3/4 — Domaine public de l'application"
 echo "Exemple : https://agence.mondomaine.fr  (HTTPS obligatoire)"
 while :; do
   read -r -p "  Domaine : " DOMAINE
@@ -73,6 +73,38 @@ while :; do
   fi
   rouge "  ✗ l'adresse doit commencer par « https:// » — le cookie de session"
   rouge "    et les webhooks Stripe ne fonctionnent pas en HTTP simple."
+done
+
+# ── Base des comptes (optionnelle) ─────────────────────────────────────────
+titre "4/4 — Base des comptes (facultatif)"
+echo "Par défaut, les comptes vivent dans la base SQLite de CETTE machine."
+echo "Pour les centraliser sur un serveur PostgreSQL, indiquez-le ici."
+echo "Laissez vide pour garder le stockage local."
+DSN_COMPTES=""
+while :; do
+  read -r -p "  Hôte PostgreSQL (vide = stockage local) : " PG_HOTE
+  [[ -z "$PG_HOTE" ]] && { jaune "  stockage local conservé"; break; }
+
+  # Une adresse IPv6 DOIT être entre crochets : sans eux, les deux-points de
+  # l'adresse sont lus comme le séparateur du port. On les ajoute nous-mêmes
+  # plutôt que de laisser l'utilisateur buter dessus.
+  if [[ "$PG_HOTE" != \[* && "$(tr -cd ':' <<<"$PG_HOTE" | wc -c)" -gt 1 ]]; then
+    PG_HOTE="[$PG_HOTE]"
+    jaune "  adresse IPv6 détectée — crochets ajoutés : $PG_HOTE"
+  fi
+
+  read -r -p "  Port [5432] : " PG_PORT; PG_PORT="${PG_PORT:-5432}"
+  read -r -p "  Base [agence] : " PG_BASE; PG_BASE="${PG_BASE:-agence}"
+  read -r -p "  Utilisateur [agence] : " PG_USER; PG_USER="${PG_USER:-agence}"
+  read -r -s -p "  Mot de passe : " PG_MDP; echo
+  [[ -z "$PG_MDP" ]] && { rouge "  ✗ mot de passe requis."; continue; }
+
+  # Encodage minimal du mot de passe : « @ » et « / » couperaient le DSN en deux.
+  PG_MDP_ENC="$(printf '%s' "$PG_MDP" | sed -e 's/%/%25/g' -e 's/@/%40/g' \
+                   -e 's|/|%2F|g' -e 's/:/%3A/g' -e 's/?/%3F/g' -e 's/#/%23/g')"
+  DSN_COMPTES="postgresql://${PG_USER}:${PG_MDP_ENC}@${PG_HOTE}:${PG_PORT}/${PG_BASE}?sslmode=require"
+  vert "  ✔ comptes centralisés sur ${PG_HOTE}:${PG_PORT}/${PG_BASE} (TLS exigé)"
+  break
 done
 
 # ── Écriture ───────────────────────────────────────────────────────────────
@@ -100,6 +132,15 @@ STRIPE_WEBHOOK_SECRET=$STRIPE_WEBHOOK_SECRET
 AGENCE_COOKIE_SECURE=1
 AGENCE_CORS_ORIGINS=$DOMAINE
 EOF
+
+if [[ -n "$DSN_COMPTES" ]]; then
+  cat >> "$ENV_FICHIER" <<EOF
+
+# Comptes centralisés sur une base PostgreSQL. Cette ligne contient un mot de
+# passe : d'où le mode 600 de ce fichier.
+AGENCE_COMPTES_DSN=$DSN_COMPTES
+EOF
+fi
 chmod 600 "$ENV_FICHIER"
 
 vert "\n✔ $ENV_FICHIER écrit (mode 600)"
@@ -128,9 +169,12 @@ cat <<EOF
      Événements : checkout.session.completed, invoice.paid,
                   invoice.payment_succeeded, customer.subscription.deleted
 
-  4. Redémarrer le service :   sudo systemctl restart agence
+  4. Si vous avez centralisé les comptes, installer le pilote :
+     pip install -r python/requirements-serveur.txt
 
-  5. Vérifier :                bash scripts/verifier-serveur.sh $DOMAINE
+  5. Redémarrer le service :   sudo systemctl restart agence
+
+  6. Vérifier :                bash scripts/verifier-serveur.sh $DOMAINE
 
   Détails complets : DEPLOIEMENT.md
 EOF

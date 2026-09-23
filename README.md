@@ -169,6 +169,29 @@ Stripe. Les remplacer par les liens de production dans
 **Mise en ligne sur votre serveur** (Stripe, webhook, HTTPS, systemd, nginx,
 sauvegardes) : [`DEPLOIEMENT.md`](DEPLOIEMENT.md).
 
+### Où vivent les comptes
+
+Par défaut dans la base SQLite de la machine — adapté à une installation de
+bureau. Une variable suffit à les centraliser sur un serveur PostgreSQL, sans
+rien changer d'autre dans l'application :
+
+```ini
+AGENCE_COMPTES_DSN=postgresql://agence:MOTDEPASSE@[2001:41d0:301::21]:5432/agence
+```
+
+Les crochets autour d'une adresse IPv6 sont obligatoires ; l'application
+refuse le DSN au démarrage en indiquant la correction si on les oublie. TLS
+est imposé vers un hôte distant (`sslmode=require` d'office, `disable`
+refusé) : la base transporte des mots de passe hachés et des jetons de
+session. Pilote : `pip install -r python/requirements-serveur.txt`.
+
+> ⚠️ **Stripe ne gère que l'IPv4**
+> ([docs.stripe.com/ips](https://docs.stripe.com/ips)). Stocker les comptes
+> sur une adresse IPv6 est sans problème — c'est du serveur à serveur. Mais le
+> serveur qui **expose l'application** doit avoir une adresse IPv4 publique, un
+> nom de domaine et un certificat valide, faute de quoi aucun webhook n'arrive
+> et aucun paiement n'est jamais confirmé.
+
 > ⚠️ **Un serveur = un utilisateur.** Les comptes gèrent l'accès et la
 > facturation, mais le portefeuille, le Chef d'Orchestre et la connexion
 > MetaTrader 5 sont des singletons **partagés par tout le processus** : sur une
@@ -305,6 +328,7 @@ d'environnement de l'hébergeur — sans toucher une ligne de code.
 │   ├── licence/           comptes, offre Essai / Pro, abonnement
 │   │   ├── config.py          SOURCE UNIQUE des limites et des tarifs
 │   │   ├── comptes.py         comptes utilisateurs, essai 3 j, sessions
+│   │   ├── depot_postgres.py  même dépôt, sur une base PostgreSQL centrale
 │   │   ├── stripe_paiement.py vérification des paiements (webhook signé)
 │   │   ├── gate.py            feature gate : agents, quotas, fonctionnalités
 │   │   ├── abonnement.py      état de licence, activation, identité du compte
@@ -327,7 +351,7 @@ d'environnement de l'hébergeur — sans toucher une ligne de code.
 │   │   ├── version.py         version unique (lue du fichier VERSION)
 │   │   ├── mise_a_jour.py     socle de mise à jour (désactivé par défaut)
 │   │   └── database.py        SQLite (signaux, ordres, portefeuille)
-│   └── tests/             suite de tests (14 modules) — python python/tests/run_tests.py
+│   └── tests/             suite de tests (15 modules) — python python/tests/run_tests.py
 ├── backend/main.py        API FastAPI + pages login/setup
 ├── backend/routes/           licence, comptes, abonnement (routes dédiées)
 ├── frontend/              tableau de bord (PWA installable)
