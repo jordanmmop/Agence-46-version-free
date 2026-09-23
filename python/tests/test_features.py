@@ -1180,7 +1180,10 @@ def test_api_entrees_malformees():
     from fastapi.testclient import TestClient
     from backend.main import app, normaliser_symboles
 
-    client = TestClient(app, raise_server_exceptions=False)
+    # Client rattaché à un compte abonné : sans session, l'application
+    # répond 401 partout (cf. python/tests/_client.py).
+    import _client
+    client = _client.client(app)
     valeurs = [None, "", "abc", 0, -1, [], {}, [1, 2], {"a": 1}, True, "NaN", " "]
     cibles = {
         "/api/risk/config": ["actif", "perte_max_pct", "max_positions", "exposition_max_pct"],

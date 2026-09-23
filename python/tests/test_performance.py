@@ -550,7 +550,8 @@ def test_api_performance():
     from utils import trading_config as tc
     tc.forcer_en_memoire()
 
-    client = TestClient(app, raise_server_exceptions=False)
+    import _client
+    client = _client.client(app)
 
     d = client.get("/api/trading/config").json()
     assert d["config"]["levier_max"] == 10.0, d

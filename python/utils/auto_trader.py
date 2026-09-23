@@ -297,6 +297,17 @@ class AutoTrader:
                 return {"success": False, "error": "Auto-trader déjà en cours"}
             self._symboles = symboles or []
             self._interval = max(30, int(interval))
+            # Compte QUI a démarré la boucle. Indispensable : le thread de
+            # fond n'est rattaché à aucune requête HTTP, il n'a donc pas de
+            # « compte courant » (cf. licence/comptes.py). Sans cette capture,
+            # la vérification d'abonnement faite à chaque cycle ne trouverait
+            # personne et couperait la boucle d'un abonné parfaitement en
+            # règle, dès le premier tour.
+            try:
+                from licence import comptes as _comptes
+                self._compte_id = (_comptes.compte_courant() or {}).get("id", "")
+            except Exception:
+                self._compte_id = ""
             self._running  = True
             self._errors   = []
             self._trading_suspendu  = False   # nouveau départ = suspension levée
@@ -353,9 +364,12 @@ class AutoTrader:
             self._purge_quotidienne_si_due()
             time.sleep(1)
 
-    @staticmethod
-    def _automatisation_autorisee() -> bool:
-        """L'abonnement couvre-t-il encore le trading automatique ?
+    def _automatisation_autorisee(self) -> bool:
+        """L'abonnement du compte qui a démarré la boucle la couvre-t-il encore ?
+
+        On interroge le compte NOMMÉ à l'appel de `start()`, relu en base à
+        chaque tour : c'est ce qui permet de détecter qu'un essai s'est écoulé
+        ou qu'un abonnement est arrivé à terme pendant que la boucle tournait.
 
         En cas de doute — couche licence injoignable, import cassé — on répond
         OUI. Couper une boucle qui a des positions réelles ouvertes à cause
@@ -364,7 +378,17 @@ class AutoTrader:
         protéger ses positions.
         """
         try:
-            from licence import gate
+            from licence import comptes, config as lconfig, gate
+            compte_id = getattr(self, "_compte_id", "")
+            if compte_id:
+                compte = comptes.depot().par_id(compte_id)
+                if compte is None:          # compte supprimé entre-temps
+                    return False
+                return comptes.etat_du_compte(compte).est_pro
+            # Aucun compte nommé : chemin « licence signée » (poste sans
+            # comptes utilisateurs) ou boucle démarrée hors requête.
+            if lconfig.COMPTE_OBLIGATOIRE and not gate.application_utilisable():
+                return False
             return gate.autorise("automatisations")
         except Exception as e:
             logger.warning(f"[licence] Vérification d'abonnement impossible ({e}) — boucle maintenue")

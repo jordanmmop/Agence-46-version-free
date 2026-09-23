@@ -106,7 +106,12 @@ hiddenimports = _app_modules + [
     "licence.abonnement",
     "licence.verification",
     "licence.quota",
+    "licence.comptes",
+    "licence.depot_postgres",
+    "licence.stripe_paiement",
     "backend.routes.licence",
+    "backend.routes.comptes",
+    "backend.routes.abonnement",
     # Dépendances tierces chargées par les agents / config (invisibles à
     # l'analyse statique car atteintes via l'arbre applicatif ci-dessus)
     "dotenv",

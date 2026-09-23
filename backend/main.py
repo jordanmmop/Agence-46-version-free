@@ -119,9 +119,30 @@ app = FastAPI(
     version=APP_VERSION,
 )
 
+def _origines_autorisees() -> list:
+    """Origines acceptées en CORS.
+
+    Par défaut « * » : l'application est conçue pour être ouverte depuis
+    n'importe quel appareil du réseau local (téléphone du même Wi-Fi), dont
+    l'adresse n'est pas connue à l'avance. `allow_credentials` restant à False,
+    aucun site tiers ne peut agir AU NOM d'un utilisateur connecté — le cookie
+    de session n'est jamais joint à une requête d'origine étrangère.
+
+    Sur un serveur public, restreindre reste préférable :
+
+        AGENCE_CORS_ORIGINS=https://agence.mondomaine.fr
+
+    (plusieurs origines séparées par des virgules). Voir DEPLOIEMENT.md.
+    """
+    brut = (os.getenv("AGENCE_CORS_ORIGINS", "") or "").strip()
+    if not brut or brut == "*":
+        return ["*"]
+    return [o.strip() for o in brut.split(",") if o.strip()]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origines_autorisees(),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
@@ -202,13 +223,95 @@ async def _auth_middleware(request: Request, call_next):
 # gérer, et aucune restriction ne peut diverger d'un endroit à l'autre.
 try:
     from backend.routes.licence import router as _licence_router
+    from backend.routes.comptes import router as _comptes_router
+    from backend.routes.abonnement import router as _abonnement_router
 except ImportError:                     # exécution directe « python backend/main.py »
     from routes.licence import router as _licence_router
+    from routes.comptes import router as _comptes_router
+    from routes.abonnement import router as _abonnement_router
 
 app.include_router(_licence_router)
+app.include_router(_comptes_router)
+app.include_router(_abonnement_router)
 
 
-from licence.gate import ProRequis, QuotaDepasse
+# ── Fermeture de l'application sans compte ni abonnement ──────────────────
+# Routes ouvertes SANS session : créer un compte, se connecter, consulter
+# l'offre, payer. Rien d'autre. C'est la liste qui rend vrai « sans compte,
+# l'application est inutilisable » — tout ce qui n'y figure pas est fermé.
+_COMPTE_PUBLIC = {
+    "/api/health",
+    "/api/compte", "/api/compte/inscription", "/api/compte/connexion",
+    "/api/compte/deconnexion", "/api/compte/disponible",
+    "/api/licence",                       # sert à l'interface à choisir son écran
+    "/manifest.json", "/sw.js", "/favicon.ico",
+    "/login", "/api/login", "/api/logout",
+}
+# Préfixes ouverts : les pages elles-mêmes et leurs ressources. L'interface
+# doit pouvoir S'AFFICHER pour proposer l'inscription ou le paiement — c'est
+# le code JavaScript qui est servi, jamais une donnée de trading.
+_COMPTE_PUBLIC_PREFIXES = ("/icons/", "/css/", "/js/", "/static/",
+                           # Un compte SUSPENDU doit pouvoir régulariser :
+                           # l'abonnement reste donc joignable en permanence.
+                           "/api/abonnement")
+
+
+def _chemin_ouvert_sans_compte(chemin: str) -> bool:
+    return (chemin in _COMPTE_PUBLIC
+            or chemin.startswith(_COMPTE_PUBLIC_PREFIXES)
+            or chemin == "/" or chemin == "/dashboard")
+
+
+@app.middleware("http")
+async def _compte_middleware(request: Request, call_next):
+    """Identifie le compte de la requête et ferme l'application sans droits.
+
+    Deux rôles, dans cet ordre :
+
+    1. Poser le compte courant (cf. licence/comptes.py) à partir du cookie de
+       session, vérifié EN BASE. Tout le reste du code — feature gate, quotas,
+       orchestrateur — lit ensuite ce compte sans se le passer de main en main.
+
+    2. Refuser la requête si l'application n'est pas utilisable : 401 sans
+       compte, 402 si l'essai de 3 jours est écoulé ou l'abonnement échu.
+
+    Le `finally` est indispensable : sans remise à zéro, le compte d'une
+    requête resterait visible de la suivante servie par le même thread — un
+    utilisateur hériterait des droits d'un autre.
+    """
+    from licence import comptes, config as lconfig
+    from licence.etat import EtatLicence
+
+    compte = None
+    try:
+        compte = comptes.compte_de_session(
+            request.cookies.get(comptes.COOKIE_SESSION, ""))
+    except Exception as e:
+        # Base illisible : on n'ouvre RIEN par défaut. L'utilisateur verra
+        # l'écran de connexion plutôt qu'une application à moitié ouverte.
+        logger.error("[comptes] Session illisible : %s", e, exc_info=True)
+
+    jeton_ctx = comptes.definir_compte_courant(compte)
+    try:
+        if (not lconfig.COMPTE_OBLIGATOIRE
+                or request.method == "OPTIONS"
+                or _chemin_ouvert_sans_compte(request.url.path)):
+            return await call_next(request)
+
+        etat = comptes.etat_du_compte(compte)
+        if etat.utilisable:
+            return await call_next(request)
+
+        from licence.gate import AbonnementRequis, CompteRequis
+        if etat is EtatLicence.COMPTE_REQUIS:
+            return JSONResponse(status_code=401, content=CompteRequis().payload())
+        return JSONResponse(status_code=402, content=AbonnementRequis(etat).payload())
+    finally:
+        comptes.reinitialiser_compte_courant(jeton_ctx)
+
+
+from licence.gate import (AbonnementRequis, CompteRequis,
+                          ProRequis, QuotaDepasse)
 
 
 @app.exception_handler(ProRequis)
@@ -223,6 +326,23 @@ async def _handler_pro_requis(request: Request, exc: ProRequis):
     route a une conséquence qui compte : une garde posée AU FOND de la pile
     (dans un agent, dans l'orchestrateur) remonte jusqu'ici avec le même
     corps de réponse, sans que la route intermédiaire ait à s'en occuper.
+    """
+    return JSONResponse(status_code=402, content=exc.payload())
+
+
+@app.exception_handler(CompteRequis)
+async def _handler_compte_requis(request: Request, exc: CompteRequis):
+    """401 : personne n'est connecté. L'interface montre l'inscription."""
+    return JSONResponse(status_code=401, content=exc.payload())
+
+
+@app.exception_handler(AbonnementRequis)
+async def _handler_abonnement_requis(request: Request, exc: AbonnementRequis):
+    """402 : compte suspendu (essai écoulé ou abonnement échu).
+
+    Même code que le verrou Pro, corps différent (`abonnement_requis`) :
+    l'interface montre le mur de paiement et ses deux formules, pas un simple
+    « fonctionnalité Pro ».
     """
     return JSONResponse(status_code=402, content=exc.payload())
 

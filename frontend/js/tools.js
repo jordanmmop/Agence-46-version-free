@@ -268,7 +268,11 @@
           affiche, il ne les fixe pas.</p>
           <div id="lic-tools-etat" class="tools-result lignes">Chargement…</div>
           <div class="tools-row">
-            <button onclick="licencePasserPro()">★ Passer à Pro</button>
+            <button onclick="compteOuvrirAbonnement()">★ S'abonner</button>
+            <button onclick="compteDeconnexion()">Se déconnecter</button>
+          </div>
+          <div class="tools-row">
+            <button onclick="licencePasserPro()">Activer une licence</button>
             <button onclick="licenceVoirOffre()">Voir les fonctionnalités Pro</button>
             <button onclick="licenceEcranEssai()">Version d'essai : ce qui est limité</button>
           </div>
@@ -317,11 +321,18 @@
     if (!d) { el.textContent = 'État de l\'offre indisponible.'; return; }
     if (typeof window.licenceAppliquer === 'function') window.licenceAppliquer(d);
     const a = d.agents || {}, q = d.quotas || {};
+    const compte = d.compte || {};
+    const essai = d.essai || {};
     const lignes = [
+      `Compte : ${compte.email || 'non connecté'}`,
       `Offre : ${d.libelle || d.etat}`,
       `Agents IA : ${a.autorises} / ${a.total}`,
       `Requêtes : ${q.illimite ? 'illimitées' : q.resume}`,
     ];
+    if (essai.en_cours) {
+      lignes.splice(2, 0, `Essai : ${Number(essai.jours_restants || 0).toFixed(1)} jour(s) restant(s)`);
+    }
+    if (compte.formule) lignes.push(`Formule : ${compte.formule}`);
     if (!q.illimite && q.heure_limite != null) {
       lignes.push(`Cette heure-ci : ${q.heure_utilise} / ${q.heure_limite}`);
     }

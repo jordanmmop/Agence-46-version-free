@@ -1892,3 +1892,121 @@ body {
 .launch-licence .launch-lic-titre { color: var(--text); font-weight: 600; }
 .launch-licence a { color: var(--accent); text-decoration: none; }
 .launch-licence a:hover { text-decoration: underline; }
+
+/* ═══════════════ COMPTE, ESSAI ET ABONNEMENT ═══════════════
+   Réutilise entièrement les blocs de l'offre (.lic-modal, .lic-btn…) :
+   mêmes variables, mêmes rayons, mêmes transitions. Rien de neuf côté
+   palette — seulement les quelques formes propres à l'inscription et aux
+   cartes de formules. */
+
+.compte-modal { z-index: 4000; }        /* au-dessus de tout : rien n'est utilisable derrière */
+.compte-box { max-width: 480px; }
+
+/* ── Onglets « Créer un compte » / « Se connecter » ── */
+.cpt-onglets {
+  display: flex;
+  gap: 0.35rem;
+  background: var(--surface2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem;
+  margin-bottom: 1.1rem;
+}
+.cpt-onglet {
+  flex: 1;
+  padding: 0.5rem 0.6rem;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+}
+.cpt-onglet:hover { color: var(--text); }
+.cpt-onglet.actif { background: var(--surface); color: var(--accent); }
+
+/* ── Formulaire ── */
+.cpt-large { width: 100%; font-family: var(--font); }
+#cpt-form .lic-label { margin-top: 0.75rem; }
+#cpt-form .lic-label:first-child { margin-top: 0; }
+.cpt-ligne { display: grid; grid-template-columns: 1fr 1.4fr; gap: 0.6rem; }
+.cpt-submit { width: 100%; margin-top: 1.1rem; padding: 0.72rem; }
+
+.cpt-note {
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  margin-top: 0.9rem;
+  line-height: 1.5;
+}
+.cpt-avert {
+  background: var(--surface2);
+  border: 1px solid rgba(216, 160, 61, 0.3);
+  border-left: 2px solid var(--yellow);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.9rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.cpt-erreur {
+  margin-top: 0.7rem;
+  font-size: 0.78rem;
+  color: var(--red);
+  min-height: 1.1em;
+  line-height: 1.5;
+}
+.cpt-erreur a { color: var(--accent); }
+
+/* ── Cartes de formules ── */
+.cpt-formules {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.7rem;
+  margin: 0.4rem 0 0.2rem;
+}
+.cpt-formule {
+  background: var(--surface2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0.95rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  transition: border-color 0.16s var(--ease);
+}
+.cpt-formule:hover { border-color: var(--accent); }
+.cpt-f-titre { font-size: 0.74rem; color: var(--text-muted); font-weight: 600;
+               text-transform: uppercase; letter-spacing: 0.04em; }
+.cpt-f-prix { font-size: 1.35rem; font-weight: 700; color: var(--text);
+              font-variant-numeric: tabular-nums; }
+.cpt-f-prix span { font-size: 0.78rem; font-weight: 400; color: var(--text-muted); }
+.cpt-f-desc { font-size: 0.74rem; color: var(--text-muted); flex: 1; line-height: 1.45; }
+.cpt-f-btn { margin-top: 0.5rem; width: 100%; }
+
+/* ── Bandeau d'essai (au-dessus de la grille) ── */
+.cpt-bandeau {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.7rem;
+  background: var(--surface);
+  border: 1px solid rgba(216, 160, 61, 0.28);
+  border-left: 2px solid var(--yellow);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.85rem;
+  margin: 0 1.25rem 0.9rem;
+  font-size: 0.79rem;
+  color: var(--text-muted);
+}
+.cpt-bandeau strong { color: var(--text); }
+.cpt-bandeau .lic-btn { margin-left: auto; padding: 0.42rem 0.85rem; font-size: 0.76rem; }
+.cpt-bandeau.cpt-urgent { border-color: rgba(229, 72, 77, 0.4); border-left-color: var(--red); }
+
+@media (max-width: 720px) {
+  .cpt-ligne { grid-template-columns: 1fr; }
+  .cpt-bandeau { margin: 0 0.75rem 0.75rem; }
+  .cpt-bandeau .lic-btn { margin-left: 0; width: 100%; }
+  .cpt-formules { grid-template-columns: 1fr; }
+}

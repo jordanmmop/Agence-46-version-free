@@ -104,16 +104,33 @@ window._authRedirect = _authRedirect;
 async function fetchJSON(url, opts = {}) {
   try {
     const r = await fetch(API + url, opts);
-    if (r.status === 401) { _authRedirect(); return null; }
-    // 402 = fonctionnalité réservée à la version Pro, 429 = quota d'essai
-    // atteint. Un SEUL endroit traduit ces refus, pour que chaque appel gardé
-    // affiche le même message sans que l'appelant ait à s'en occuper.
+    // 401 = personne n'est connecté : l'application est fermée, on montre
+    // l'écran d'inscription / connexion plutôt qu'une erreur.
+    if (r.status === 401) {
+      const body = await r.json().catch(() => ({}));
+      if (body && body.compte_requis && typeof window.compteOuvrirAuth === 'function') {
+        if (typeof window.compteCharger === 'function') window.compteCharger();
+        else window.compteOuvrirAuth('inscription');
+        return null;
+      }
+      _authRedirect();
+      return null;
+    }
+    // 402 = soit le compte est suspendu (essai écoulé, abonnement échu) et
+    // l'application entière est fermée, soit une fonctionnalité Pro est
+    // verrouillée dans un essai qui tourne. 429 = quota d'essai atteint.
+    // Un SEUL endroit traduit ces refus : l'appelant n'a rien à en savoir.
     if (r.status === 402 || r.status === 429) {
       const body = await r.json().catch(() => ({}));
-      const infos = (body && body.pro_requis) ? body
-                  : (body && body.detail && body.detail.pro_requis) ? body.detail : null;
-      if (infos && typeof window.licenceVerrou === 'function') {
-        window.licenceVerrou(infos);
+      const corps = (body && (body.pro_requis || body.abonnement_requis)) ? body
+                  : (body && body.detail) ? body.detail : null;
+      // Compte suspendu : mur de paiement, pas un simple message « Pro ».
+      if (corps && corps.abonnement_requis) {
+        if (typeof window.compteCharger === 'function') window.compteCharger();
+        return null;
+      }
+      if (corps && corps.pro_requis && typeof window.licenceVerrou === 'function') {
+        window.licenceVerrou(corps);
         // Les quotas ont pu changer : remettre le compteur de l'en-tête à jour.
         if (typeof window.licenceCharger === 'function') window.licenceCharger(false);
         return null;
