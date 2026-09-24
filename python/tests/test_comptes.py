@@ -237,6 +237,69 @@ def test_etat_du_moteur_ia_exploitable_par_la_page():
     print("  OK — l'état du moteur IA porte les champs lus par la page")
 
 
+def test_aucune_boucle_de_redirection_sur_401():
+    """Un 401 ne doit JAMAIS provoquer de navigation.
+
+    Ce défaut a rendu l'application inutilisable : mt5.js, auto_trader.js,
+    charts.js et tools.js appellent tous `_authRedirect()` quand ils reçoivent
+    un 401. Cette fonction envoyait vers /login, qui redirige vers / quand le
+    code d'accès est désactivé — son cas par défaut. Chaque sondage périodique
+    relançait donc un cycle complet : la page se rechargeait sans fin et
+    l'écran d'accueil restait figé sur « Backend hors ligne », alors que le
+    serveur répondait parfaitement.
+
+    On vérifie la PROPRIÉTÉ qui empêche la boucle : l'écran de compte est
+    consulté avant toute navigation.
+    """
+    app_js = (_RACINE / "frontend" / "js" / "app.js").read_text(encoding="utf-8")
+    debut = app_js.index("function _authRedirect()")
+    corps = app_js[debut:debut + 900]
+
+    avant_navigation = corps.index("location.href")
+    for sortie in ("window.compteCharger", "window.compteOuvrirAuth"):
+        assert sortie in corps[:avant_navigation], (
+            f"_authRedirect navigue sans consulter {sortie} : la boucle "
+            f"de rechargement peut revenir")
+    assert "_redirectionFaite" in corps, "aucun garde-fou contre une seconde redirection"
+
+    # Et /login doit toujours renvoyer vers / : c'est l'autre moitié du cycle.
+    _isoler()
+    c = _app()
+    r = c.get("/login", follow_redirects=False)
+    assert r.status_code == 302 and r.headers.get("location") == "/", (
+        "/login ne renvoie plus vers / — vérifier que _authRedirect ne peut "
+        "toujours pas boucler")
+    print("  OK — un 401 ouvre l'écran de compte, sans navigation ni boucle")
+
+
+def test_ecran_d_accueil_ne_ment_pas_sur_le_backend():
+    """« Backend hors ligne » ne doit s'afficher que si le serveur est ÉTEINT.
+
+    L'écran sondait /api/status, qui exige un compte : son 401 se lisait
+    « backend hors ligne » sur une application servie par ce même backend.
+    Le message accusait le serveur d'être éteint alors qu'il venait d'envoyer
+    la page qu'on était en train de lire.
+    """
+    _isoler()
+    c = _app()
+
+    # La sonde de vivacité doit être une route TOUJOURS ouverte.
+    assert c.get("/api/health").status_code == 200
+
+    app_js = (_RACINE / "frontend" / "js" / "app.js").read_text(encoding="utf-8")
+    debut = app_js.index("async function initLaunchScreen()")
+    corps = app_js[debut:app_js.index("async function", debut + 10)]
+
+    assert "'/api/health'" in corps, "la vivacité n'est plus sondée sur /api/health"
+    position_sante = corps.index("'/api/health'")
+    position_hors_ligne = corps.index("Backend hors ligne")
+    assert position_sante < position_hors_ligne, (
+        "« Backend hors ligne » est affiché avant d'avoir vérifié /api/health")
+    # Et l'absence de compte doit être dite pour ce qu'elle est.
+    assert "compte_requis" in corps, "l'accueil ne distingue pas « pas de compte » de « serveur éteint »"
+    print("  OK — l'accueil distingue serveur éteint et compte manquant")
+
+
 def test_inscription_ouvre_trois_jours():
     _isoler()
     c = _app()
@@ -738,6 +801,8 @@ def run():
         test_ecran_de_premier_lancement_accessible()
         test_toutes_les_routes_de_l_ecran_de_lancement_repondent()
         test_etat_du_moteur_ia_exploitable_par_la_page()
+        test_aucune_boucle_de_redirection_sur_401()
+        test_ecran_d_accueil_ne_ment_pas_sur_le_backend()
         test_inscription_ouvre_trois_jours()
         test_champs_obligatoires()
         test_contact_deja_enregistre_refuse()

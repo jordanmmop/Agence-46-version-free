@@ -45,6 +45,7 @@
     peindreBadge();
     peindreQuota();
     peindreLancement();
+    presenterUneFois();
     if (typeof window.licenceRafraichirAgents === 'function') window.licenceRafraichirAgents();
   }
   window.licenceAppliquer = appliquer;
@@ -329,15 +330,23 @@
   // les limites, elles, sont tenues par le serveur.
   function presenterUneFois() {
     if (estPro()) return;
+    // Rien à présenter tant qu'il n'y a pas de compte, ou qu'il est suspendu :
+    // l'écran d'inscription ou le mur de paiement passe avant.
+    if (!etat || !etat.utilisable) return;
     try {
       if (localStorage.getItem('lic-essai-vu')) return;
-      localStorage.setItem('lic-essai-vu', '1');
     } catch (e) { return; }      // navigation privée : ne pas insister
+
+    // Attendre d'être DANS le tableau de bord. Présentée sur l'écran
+    // d'accueil, cette modale se plaçait par-dessus « Lancer l'application »
+    // et empêchait purement et simplement d'entrer dans l'application.
+    const accueil = document.getElementById('launch-screen');
+    const surAccueil = !!accueil && accueil.style.display !== 'none';
+    if (surAccueil) return;      // on réessaiera au prochain appel
+
+    try { localStorage.setItem('lic-essai-vu', '1'); } catch (e) { return; }
     setTimeout(ouvrirEssai, 1200);
   }
 
-  document.addEventListener('DOMContentLoaded', async () => {
-    await charger(false);
-    presenterUneFois();
-  });
+  document.addEventListener('DOMContentLoaded', () => { charger(false); });
 })();

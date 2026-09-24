@@ -191,8 +191,7 @@
     if (d && d.success) {
       if (d.licence) appliquer(d.licence);
       fermerEcran();
-      // Le tableau de bord doit repartir sur les données du compte.
-      if (typeof init === 'function') init();
+      rafraichirEcranCourant();
       return;
     }
     sortie.innerHTML = '❌ ' + E((d && d.error) || 'Impossible pour le moment.');
@@ -203,6 +202,27 @@
       const a = document.getElementById('cpt-vers-connexion');
       if (a) a.addEventListener('click', ev => { ev.preventDefault(); ouvrirAuth('connexion'); });
     }
+  }
+
+  // Après une connexion, une inscription ou un paiement, l'écran VISIBLE doit
+  // repartir sur le nouvel état — pas seulement le tableau de bord.
+  //
+  // Sans cela, l'écran d'accueil gardait le message « Créez un compte pour
+  // commencer » et son bouton « Lancer l'application » grisé alors que le
+  // compte venait d'être créé : l'utilisateur se retrouvait bloqué devant une
+  // application qui l'avait pourtant accepté.
+  function rafraichirEcranCourant() {
+    // L'écran d'accueil est masqué par `style.display = 'none'`
+    // (transitionerVersDashboard), pas par une classe : c'est donc le style
+    // calculé qui fait foi.
+    const accueil = document.getElementById('launch-screen');
+    const surAccueil = !!accueil && accueil.style.display !== 'none'
+                       && !accueil.classList.contains('fade-out');
+    if (surAccueil && typeof initLaunchScreen === 'function') {
+      initLaunchScreen();
+      return;
+    }
+    if (typeof init === 'function') init();
   }
 
   window.compteDeconnexion = async function () {
@@ -274,7 +294,7 @@
     if (d && !d.compte_suspendu) {
       sortie.innerHTML = '✅ Abonnement actif — accès rétabli.';
       fermerEcran();
-      if (typeof init === 'function') init();
+      rafraichirEcranCourant();
       return;
     }
     sortie.innerHTML = "⏳ Aucun paiement confirmé pour l'instant. "

@@ -93,11 +93,38 @@ function renderChips(conteneur, symboles, selection, handler) {
 // ========================= API =========================
 let _backendDown = false;
 
-// Session expirée / non authentifié → page de connexion
+// Réponse 401 reçue par n'importe quel module (mt5.js, auto_trader.js,
+// charts.js, tools.js appellent tous celle-ci).
+//
+// ATTENTION — cette fonction a provoqué une BOUCLE DE RECHARGEMENT INFINIE.
+// Elle envoyait vers /login ; or /login redirige vers / quand le code d'accès
+// est désactivé (c'est le cas par défaut). Chaque sondage périodique d'un de
+// ces modules recevait un 401, redirigeait, revenait sur /, resondait… La page
+// n'avait jamais le temps de s'afficher : l'écran d'accueil restait figé sur
+// « Backend hors ligne » alors que le serveur répondait parfaitement.
+//
+// Désormais : quand l'application dispose de l'écran de compte — c'est-à-dire
+// toujours —, un 401 signifie « personne n'est connecté ». On AFFICHE l'écran
+// d'inscription, sans navigation. Le repli vers /login ne sert plus qu'aux
+// installations où seul l'ancien code d'accès existe.
+let _redirectionFaite = false;
+
 function _authRedirect() {
-  if (!location.pathname.startsWith('/login')) {
-    location.href = '/login?next=' + encodeURIComponent(location.pathname);
+  // L'écran de compte sait quoi montrer (inscription, connexion, ou mur de
+  // paiement). Aucune navigation : donc aucune boucle possible.
+  if (typeof window.compteCharger === 'function') {
+    window.compteCharger();
+    return;
   }
+  if (typeof window.compteOuvrirAuth === 'function') {
+    window.compteOuvrirAuth('inscription');
+    return;
+  }
+  // Repli historique. Le drapeau est une seconde barrière : même si /login
+  // renvoyait un jour vers une page qui redemande, on ne boucle qu'une fois.
+  if (_redirectionFaite || location.pathname.startsWith('/login')) return;
+  _redirectionFaite = true;
+  location.href = '/login?next=' + encodeURIComponent(location.pathname);
 }
 window._authRedirect = _authRedirect;
 
@@ -188,15 +215,47 @@ async function initLaunchScreen() {
   const msg = document.getElementById('launch-status-msg');
   dot.className = 'status-dot loading';
 
-  const status = await fetchJSON('/api/status');
+  // Vivacité du serveur : /api/health, la seule route toujours ouverte. Sonder
+  // /api/status ici était une faute de raisonnement — cette route exige un
+  // compte, et son 401 se lisait « backend hors ligne » sur une application
+  // servie… par ce même backend. Le message accusait le serveur d'être éteint
+  // alors qu'il venait d'envoyer la page qu'on était en train de lire.
+  let enLigne = false;
+  try {
+    enLigne = (await fetch('/api/health')).ok;
+  } catch (e) { enLigne = false; }
 
-  if (status) {
-    dot.className = 'status-dot ok';
-    msg.textContent = `Connecté • ${status.nb_total || 46} agents prêts`;
-    document.getElementById('btn-launch').disabled = false;
-  } else {
+  if (!enLigne) {
     dot.className = 'status-dot error';
     msg.textContent = 'Backend hors ligne — lancez AgenceNumerique.exe ou start.py';
+    return;
+  }
+
+  // Le serveur répond : reste à savoir ce que l'utilisateur a le droit de
+  // faire. /api/licence est ouverte sans compte, c'est elle qui l'indique.
+  let licence = null;
+  try {
+    const r = await fetch('/api/licence');
+    if (r.ok) licence = await r.json();
+  } catch (e) { /* traité juste après */ }
+
+  const btn = document.getElementById('btn-launch');
+
+  if (licence && licence.compte_requis) {
+    dot.className = 'status-dot loading';
+    msg.textContent = `Créez un compte pour commencer — ${licence.essai?.jours || 3} jours d'essai gratuit`;
+    btn.disabled = true;
+    if (typeof window.compteOuvrirAuth === 'function') window.compteOuvrirAuth('inscription');
+  } else if (licence && licence.compte_suspendu) {
+    dot.className = 'status-dot error';
+    msg.textContent = licence.libelle || 'Abonnement requis';
+    btn.disabled = true;
+    if (typeof window.compteOuvrirPaywall === 'function') window.compteOuvrirPaywall();
+  } else {
+    const status = await fetchJSON('/api/status');
+    dot.className = 'status-dot ok';
+    msg.textContent = `Connecté • ${status?.nb_total || 46} agents prêts`;
+    btn.disabled = false;
   }
 
   await chargerSymbolesLancement();
