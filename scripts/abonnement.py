@@ -6,6 +6,17 @@
     python scripts/abonnement.py activer alice@exemple.fr --formule annuel \\
                                          --reference pi_3Q... [--jours 372]
     python scripts/abonnement.py canaux
+    python scripts/abonnement.py diagnostic
+
+SANS SERVEUR — émission manuelle des licences :
+
+    python scripts/abonnement.py emetteur                      (une seule fois)
+    python scripts/abonnement.py licence alice@exemple.fr --formule annuel
+
+Ces deux commandes n'ont besoin NI de serveur, NI de base partagée : le jeton
+produit se vérifie par SIGNATURE sur le poste du client, hors ligne. C'est le
+seul chemin praticable tant qu'aucune machine joignable par Stripe n'héberge
+l'application — voir DEPLOIEMENT.md.
 
 À QUOI ÇA SERT
 --------------
@@ -124,6 +135,97 @@ def cmd_cle(args) -> int:
     for detail in envoi["details"]:
         print(f"  · {detail}")
     print("\n  La clé précédente est révoquée. Celle-ci ne sera pas réaffichée.")
+    return 0
+
+
+def cmd_emetteur(args) -> int:
+    """Crée (au premier appel) et affiche la paire de clés de l'émetteur.
+
+    La clé PUBLIQUE doit être posée dans l'application AVANT compilation : sans
+    elle, les postes de vos clients n'ont aucun moyen de reconnaître vos
+    licences, et toute activation échoue. La clé PRIVÉE ne quitte jamais cette
+    machine — c'est elle qui fait de vous l'émetteur.
+    """
+    from licence import emetteur
+
+    privee = emetteur.cle_privee(creer=True)
+    if not privee:
+        print("✗ Impossible de créer la paire de clés : le module "
+              "« cryptography » est absent.\n  pip install cryptography")
+        return 1
+    publique = emetteur.cle_publique_hex()
+    if not publique:
+        print("✗ Clé publique illisible.")
+        return 1
+
+    chemin = emetteur._chemin_fichier()
+    print("Émetteur de licences de cette machine\n")
+    print(f"  Clé privée : {chemin}")
+    print("               NE LA PARTAGEZ JAMAIS, ne la sauvegardez pas dans")
+    print("               un dossier synchronisé public. Qui la détient peut")
+    print("               fabriquer des abonnements Pro.")
+    print("               Gardez-en une copie hors ligne : la perdre invalide")
+    print("               toutes les licences déjà remises à vos clients.\n")
+    print(f"  Clé PUBLIQUE (ce n'est pas un secret) :\n\n    {publique}\n")
+    print("  À coller dans python/licence/verification.py AVANT de compiler :\n")
+    print(f'    CLE_PUBLIQUE_EMETTEUR = "{publique}"\n')
+    print("  Puis recompilez et rediffusez l'application : les versions déjà")
+    print("  installées chez vos clients n'accepteront pas vos licences tant")
+    print("  qu'elles n'embarquent pas cette clé.")
+    return 0
+
+
+def cmd_licence(args) -> int:
+    """Signe une licence Pro pour un client, et la lui envoie.
+
+    NE CONSTATE AUCUN PAIEMENT. Vous lancez cette commande parce que vous avez
+    vu le règlement dans votre tableau de bord Stripe ; la référence demandée
+    est ce qui vous permettra de le retrouver.
+
+    Aucune base partagée n'est nécessaire : le jeton produit porte sa propre
+    preuve — une signature que le poste du client vérifie seul, hors ligne.
+    """
+    import time as _t
+    from licence import emetteur, notifications
+    from licence import config as lconfig
+
+    destinataire = (args.compte or "").strip()
+    if "@" not in destinataire:
+        print("✗ Indiquez l'adresse e-mail du client.")
+        return 2
+    if not args.reference:
+        print("✗ --reference est obligatoire : indiquez l'identifiant du\n"
+              "  paiement tel qu'il apparaît dans votre tableau de bord Stripe.\n"
+              "  C'est la seule trace qui rattachera cette licence à un règlement.")
+        return 2
+
+    jours = args.jours if args.jours else lconfig.DUREE_DROITS_JOURS.get(args.formule, 34)
+    echeance = _t.time() + float(jours) * 86400
+    jeton = emetteur.emettre(destinataire, echeance)
+    if not jeton:
+        print("✗ Aucune licence signée : émetteur indisponible.\n"
+              "  Lancez d'abord :  python scripts/abonnement.py emetteur")
+        return 1
+
+    fin = _t.strftime("%d/%m/%Y", _t.localtime(echeance))
+    print(f"\n  Licence {args.formule} pour {destinataire}, valable jusqu'au {fin}")
+    print(f"  Référence du règlement : {args.reference}\n")
+    print(f"  LICENCE À REMETTRE AU CLIENT :\n\n{jeton}\n")
+
+    # L'envoi réutilise exactement le même chemin que la remise automatique :
+    # un seul code d'envoi, donc un seul comportement à vérifier.
+    faux_compte = {"id": destinataire, "email": destinataire,
+                   "telephone": args.telephone or "", "abonne_jusqua": echeance}
+    envoi = notifications.envoyer_cle(faux_compte, jeton, args.formule)
+    for detail in envoi["details"]:
+        print(f"  · {detail}")
+    if not envoi["cle_remise"]:
+        print("\n  Aucun envoi n'a abouti : transmettez la licence ci-dessus\n"
+              "  vous-même. Elle tient sur une seule ligne, sans espace.")
+
+    print("\n  ⚠️ Une licence signée n'est PAS révocable : elle reste valable\n"
+          f"     jusqu'au {fin} même si le client résilie entre-temps.\n"
+          "     Pour un abonnement mensuel, émettez des licences mensuelles.")
     return 0
 
 
@@ -286,6 +388,22 @@ def main(argv=None) -> int:
     p = sous.add_parser("diagnostic",
                         help="Pourquoi un client n'a pas reçu sa clé")
     p.set_defaults(fonction=cmd_diagnostic)
+
+    p = sous.add_parser("emetteur",
+                        help="Créer/afficher la paire de clés de l'émetteur")
+    p.set_defaults(fonction=cmd_emetteur)
+
+    p = sous.add_parser("licence",
+                        help="Signer une licence pour un client (sans serveur)")
+    p.add_argument("compte", help="adresse e-mail du client")
+    p.add_argument("--formule", default="mensuel", choices=("mensuel", "annuel"))
+    p.add_argument("--reference", default="",
+                   help="Identifiant Stripe du règlement (obligatoire)")
+    p.add_argument("--telephone", default="",
+                   help="Pour envoyer aussi par SMS")
+    p.add_argument("--jours", type=float, default=None,
+                   help="Durée ; par défaut celle de la formule")
+    p.set_defaults(fonction=cmd_licence)
 
     args = analyseur.parse_args(argv)
     # `.env` du serveur : sans lui, l'outil ne verrait ni la base centrale ni

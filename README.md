@@ -194,11 +194,17 @@ constaté dans le tableau de bord Stripe. Quand un client n'a rien reçu,
 `scripts/abonnement.py diagnostic` contrôle la chaîne entière et nomme le
 maillon fautif.
 
-> ⚠️ L'abonnement exige un serveur où un **processus Python permanent** peut
-> tourner et que **Stripe peut joindre en HTTPS**. Un hébergement web
-> **mutualisé** (accès FTP seulement, comme `clusterXXX.hosting.ovh.net`) ne
-> convient pas : c'est un espace de fichiers PHP. Voir le tableau en tête de
-> [`DEPLOIEMENT.md`](DEPLOIEMENT.md).
+> ⚠️ La confirmation **automatique** des paiements exige un serveur où un
+> processus Python permanent peut tourner et que **Stripe peut joindre en
+> HTTPS**. Un hébergement web **mutualisé** (accès FTP seulement, comme
+> `clusterXXX.hosting.ovh.net`) ne convient pas : c'est un espace de fichiers
+> PHP. Voir le tableau en tête de [`DEPLOIEMENT.md`](DEPLOIEMENT.md).
+>
+> **Sans serveur**, vous pouvez vendre quand même en émettant les licences
+> vous-même : `scripts/abonnement.py emetteur` une fois, puis
+> `scripts/abonnement.py licence <client> --formule … --reference …` à chaque
+> règlement constaté dans Stripe. La licence signée se vérifie hors ligne sur
+> le poste du client. Procédure et limites : `DEPLOIEMENT.md`, section 0 ter.
 
 **Mise en ligne sur votre serveur** (Stripe, webhook, HTTPS, systemd, nginx,
 sauvegardes) : [`DEPLOIEMENT.md`](DEPLOIEMENT.md).

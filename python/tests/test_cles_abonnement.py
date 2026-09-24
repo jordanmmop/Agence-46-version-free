@@ -741,6 +741,89 @@ def test_aucun_secret_en_dur_dans_les_nouveaux_modules():
     print("  OK — aucun identifiant d'envoi ni clé privée en dur")
 
 
+def test_licence_signee_debloque_un_poste_sans_serveur():
+    """Le chemin SANS SERVEUR : l'éditeur signe, le client colle, ça marche.
+
+    Tant qu'aucune machine joignable par Stripe n'héberge l'application,
+    c'est le seul chemin praticable — et il doit fonctionner sur un poste qui
+    n'a NI compte, NI base partagée, NI réseau.
+    """
+    _isoler()
+    from licence import abonnement, comptes, emetteur, gate, verification
+    from licence.etat import EtatLicence
+
+    # ── Côté éditeur : la paire de clés, puis une licence signée ──
+    assert emetteur.cle_privee(creer=True), "l'émetteur doit pouvoir naître"
+    publique = emetteur.cle_publique_hex()
+    assert len(publique) == 64, publique
+    jeton = emetteur.emettre("client@exemple.fr", time.time() + 372 * 86400)
+    assert jeton.startswith("AGENCE1.")
+
+    # ── Côté client : clé PUBLIQUE embarquée, clé privée absente ──
+    origine_pub = verification.CLE_PUBLIQUE_EMETTEUR
+    origine_chemin = emetteur._chemin_fichier
+    verification.CLE_PUBLIQUE_EMETTEUR = publique
+    os.environ.pop("AGENCE_LICENCE_PUBKEY", None)
+    emetteur._chemin_fichier = lambda: Path(tempfile.mkdtemp()) / "absent.json"
+    try:
+        comptes.definir_compte_courant(None)
+        abonnement.invalider_cache()
+        assert abonnement.etat() is EtatLicence.COMPTE_REQUIS
+
+        resultat = abonnement.activer(jeton)
+        assert resultat["success"] is True, resultat
+        assert abonnement.est_pro() is True
+
+        from agents import TOUS_LES_AGENTS
+        etat = gate.etat_public(TOUS_LES_AGENTS)
+        assert etat["agents"]["autorises"] == etat["agents"]["total"] == 45
+        assert etat["quotas"]["illimite"] is True
+
+        # Une licence signée par QUELQU'UN D'AUTRE est refusée : c'est tout
+        # l'intérêt de la signature.
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives import serialization as ser
+        autre = Ed25519PrivateKey.generate()
+        emetteur._lire_fichier = lambda: {"privee": autre.private_bytes(
+            ser.Encoding.Raw, ser.PrivateFormat.Raw, ser.NoEncryption()).hex()}
+        faux = emetteur.emettre("pirate@exemple.fr", time.time() + 86400)
+        abonnement.effacer_licence()
+        assert abonnement.activer(faux)["success"] is False
+        assert abonnement.est_pro() is False
+    finally:
+        verification.CLE_PUBLIQUE_EMETTEUR = origine_pub
+        emetteur._chemin_fichier = origine_chemin
+        import importlib
+        importlib.reload(emetteur)
+        abonnement.effacer_licence()
+        abonnement.invalider_cache()
+    print("  OK — licence signée : Pro débloqué hors ligne, sans serveur")
+
+
+def test_outil_emetteur_et_licence_disponibles():
+    """Les deux commandes du chemin sans serveur doivent exister et tourner."""
+    import subprocess
+    import sys
+    script = _RACINE / "scripts" / "abonnement.py"
+    texte = script.read_text(encoding="utf-8")
+    assert "cmd_emetteur" in texte and "cmd_licence" in texte
+    # La commande ne doit jamais prétendre constater un paiement.
+    assert "NE CONSTATE AUCUN PAIEMENT" in texte
+    # Ni laisser croire qu'une licence signée se révoque.
+    assert "n'est PAS révocable" in texte
+    # Ni oublier de dire où va la clé publique.
+    assert "CLE_PUBLIQUE_EMETTEUR" in texte
+
+    # `licence` sans référence de règlement doit refuser.
+    sortie = subprocess.run(
+        [sys.executable, str(script), "licence", "x@exemple.fr"],
+        capture_output=True, text=True, timeout=180)
+    assert sortie.returncode == 2, sortie.stdout
+    assert "--reference est obligatoire" in sortie.stdout
+    assert "AGENCE1." not in sortie.stdout, "aucune licence ne doit sortir"
+    print("  OK — commandes « emetteur » et « licence » en place")
+
+
 def test_diagnostic_nomme_le_premier_maillon_casse():
     """« Pourquoi mon client n'a pas reçu sa clé ? » doit avoir une réponse.
 
@@ -842,6 +925,8 @@ def run():
         test_documentation_couvre_la_remise_des_cles()
         test_interface_propose_la_cle()
         test_aucun_secret_en_dur_dans_les_nouveaux_modules()
+        test_licence_signee_debloque_un_poste_sans_serveur()
+        test_outil_emetteur_et_licence_disponibles()
         test_diagnostic_nomme_le_premier_maillon_casse()
         test_outil_admin_ne_simule_aucun_paiement()
     finally:

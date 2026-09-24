@@ -27,10 +27,75 @@ droit de faire tourner un processus permanent :
 > e-mail** (MX Plan chez OVH), elles servent très bien à l'envoi des clés
 > d'abonnement — voir la section 4 bis.
 
-**Si vous n'avez pas de machine avec shell**, l'abonnement ne peut pas
-fonctionner : confirmer un paiement exige la clé secrète Stripe, qui ne doit
-**jamais** être installée sur les postes de vos clients. Un VPS d'entrée de
-gamme suffit largement.
+**Si vous n'avez pas de machine avec shell**, la confirmation AUTOMATIQUE des
+paiements ne peut pas fonctionner : elle exige la clé secrète Stripe, qui ne
+doit **jamais** être installée sur les postes de vos clients. Un VPS d'entrée
+de gamme suffit largement — mais vous pouvez aussi vendre dès aujourd'hui sans
+rien louer, en émettant les licences vous-même (section suivante).
+
+---
+
+## 0 ter. Vendre SANS serveur — émission manuelle des licences
+
+C'est le chemin à retenir tant qu'aucune machine n'est joignable par Stripe.
+Il n'utilise **ni serveur, ni base partagée, ni réseau chez le client** : vous
+signez une licence, le client la colle, son application la vérifie toute
+seule. C'est l'architecture prévue depuis l'origine (`licence/verification.py`).
+
+En contrepartie, tout ce qui était automatique devient manuel : vous constatez
+le paiement dans Stripe, et vous émettez la licence.
+
+### Une seule fois — devenir l'émetteur
+
+```bash
+python scripts/abonnement.py emetteur
+```
+
+La commande crée votre paire de clés et affiche la clé **publique**. Collez-la
+dans `python/licence/verification.py` **avant de compiler** :
+
+```python
+CLE_PUBLIQUE_EMETTEUR = "collez ici les 64 caracteres affiches"
+```
+
+Puis recompilez et rediffusez l'application. Les versions déjà installées
+n'accepteront pas vos licences tant qu'elles n'embarquent pas cette clé.
+
+> **La clé privée** vit dans `~/.agence_financiere/licence_emetteur.json`
+> (mode 600) et ne doit **jamais** sortir de votre machine : qui la détient
+> peut fabriquer des abonnements. **Gardez-en une copie hors ligne** — la
+> perdre invaliderait toutes les licences déjà remises.
+
+### À chaque client qui paie
+
+1. Le client règle sur un de vos deux liens Stripe.
+2. Vous voyez le règlement dans **Stripe → Paiements** et copiez sa référence.
+3. Vous émettez sa licence :
+
+```bash
+python scripts/abonnement.py licence alice@exemple.fr \
+       --formule annuel --reference cs_live_xxxxxxxx
+```
+
+La licence est affichée et, si l'envoi est configuré (section 4 bis), envoyée
+par e-mail et SMS. Le client la colle dans **« Passer à la version Pro »**.
+
+### Ce que ce chemin ne fait pas
+
+| | Avec serveur | Sans serveur |
+|---|---|---|
+| Confirmation du paiement | automatique (webhook signé) | **vous**, depuis Stripe |
+| Remise de la licence | automatique | une commande par client |
+| Renouvellement mensuel | automatique | **à réémettre** chaque mois |
+| Résiliation en cours de période | droits coupés au terme | **impossible** : une licence signée vaut jusqu'à son échéance |
+| Comptes partagés entre appareils | oui | non — la licence vaut pour l'installation |
+
+> Une licence signée **n'est pas révocable**. Pour un abonnement mensuel,
+> émettez donc des licences **mensuelles** : un client qui résilie garde ses
+> droits jusqu'à la date que vous avez signée, pas au-delà.
+
+C'est tenable pour vos premiers clients. Au-delà de quelques dizaines, la
+charge manuelle et l'absence de révocation justifient un serveur.
 
 ---
 
