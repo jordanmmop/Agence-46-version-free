@@ -12,7 +12,25 @@
 
 (function () {
   let etat = null;          // dernier /api/licence reçu
-  let ecranOuvert = null;   // 'auth' | 'paywall' | null
+  let ecranOuvert = null;   // 'auth' | 'paywall' | 'abonnement' | null
+  let modeAuthOuvert = null;// 'inscription' | 'connexion'
+  let chargementEnCours = null;   // promesse partagée (évite les rafales)
+  let dernierChargement = 0;
+  // Ce que l'utilisateur a déjà tapé, conservé HORS du DOM : l'onglet
+  // « Se connecter » n'affiche ni téléphone ni adresse, donc relire les champs
+  // au moment du basculement ne suffit pas — ces valeurs seraient perdues en
+  // revenant sur « Créer un compte », et l'inscription échouerait sur un champ
+  // vidé à l'insu de celui qui l'avait rempli.
+  const saisie = {};
+  const CHAMPS = ['cpt-email', 'cpt-mdp', 'cpt-tel', 'cpt-adresse',
+                  'cpt-cp', 'cpt-ville', 'cpt-pays'];
+
+  function memoriserSaisie() {
+    for (const id of CHAMPS) {
+      const el = document.getElementById(id);
+      if (el && el.value) saisie[id] = el.value;
+    }
+  }
 
   function E(s) {
     return (typeof esc === 'function') ? esc(s) : String(s == null ? '' : s)
@@ -25,14 +43,26 @@
   window.compteEtat = () => etat;
 
   // ── Lecture de l'état (route ouverte sans session) ───────────────
-  async function charger() {
-    let d = null;
-    try {
-      const r = await fetch('/api/licence');
-      if (r.ok) d = await r.json();
-    } catch (e) { /* serveur injoignable : app.js affiche déjà son bandeau */ }
-    if (d) appliquer(d);
-    return d;
+  // Les sondages périodiques (mt5.js, auto_trader.js, charts.js, tools.js)
+  // reçoivent tous un 401 tant qu'aucun compte n'existe, et appellent alors
+  // cette fonction. Sans mutualisation, c'était une RAFALE de requêtes par
+  // seconde — et autant de redessins de l'écran.
+  async function charger(forcer) {
+    if (chargementEnCours) return chargementEnCours;
+    if (!forcer && Date.now() - dernierChargement < 1000) return etat;
+
+    chargementEnCours = (async () => {
+      let d = null;
+      try {
+        const r = await fetch('/api/licence');
+        if (r.ok) d = await r.json();
+      } catch (e) { /* serveur injoignable : app.js affiche déjà son bandeau */ }
+      dernierChargement = Date.now();
+      chargementEnCours = null;
+      if (d) appliquer(d);
+      return d;
+    })();
+    return chargementEnCours;
   }
   window.compteCharger = charger;
 
@@ -51,8 +81,21 @@
   // chargement, même s'il a fermé la fenêtre la fois précédente.
   function arbitrerEcran() {
     if (!etat) return;
-    if (etat.compte_requis) { ouvrirAuth(); return; }
-    if (etat.compte_suspendu) { ouvrirPaywall(); return; }
+    if (etat.compte_requis) {
+      // DÉJÀ ouvert : ne rien faire. Rouvrir détruisait et reconstruisait le
+      // formulaire — effaçant ce que l'utilisateur était en train de taper et
+      // lui reprenant le curseur. Comme les sondages déclenchent cet arbitrage
+      // plusieurs fois par minute, le formulaire devenait impossible à
+      // remplir : il se vidait sous les doigts.
+      if (ecranOuvert === 'auth') return;
+      ouvrirAuth();
+      return;
+    }
+    if (etat.compte_suspendu) {
+      if (ecranOuvert === 'paywall') return;
+      ouvrirPaywall();
+      return;
+    }
     fermerEcran();
   }
 
@@ -60,6 +103,7 @@
     const m = document.getElementById('compte-modal');
     if (m) m.remove();
     ecranOuvert = null;
+    modeAuthOuvert = null;
   }
 
   function ouvrirEcran(id, contenu, fermable) {
@@ -77,7 +121,18 @@
 
   // ═══════════════ INSCRIPTION / CONNEXION ═══════════════
   function ouvrirAuth(mode) {
-    mode = mode || 'inscription';
+    mode = mode || modeAuthOuvert || 'inscription';
+
+    // Déjà affiché dans ce mode : ne RIEN reconstruire. Dernière barrière,
+    // quel que soit l'appelant — un redessin fait perdre la saisie en cours
+    // et le curseur. C'est ce qui rendait l'inscription impossible.
+    if (ecranOuvert === 'auth' && modeAuthOuvert === mode) return;
+
+    // Changement d'onglet : on reprend ce qui est déjà tapé plutôt que de le
+    // jeter. Passer de « Créer un compte » à « Se connecter » ne doit pas
+    // faire ressaisir son adresse.
+    memoriserSaisie();
+
     const essai = (etat && etat.essai && etat.essai.jours) || 3;
     const inscription = mode === 'inscription';
 
@@ -144,6 +199,21 @@
         <div id="cpt-erreur" class="cpt-erreur"></div>
       </div>`, false);
 
+    ecranOuvert = 'auth';
+    modeAuthOuvert = mode;
+
+    // Restaurer ce qui était déjà tapé.
+    for (const [id, valeur] of Object.entries(saisie)) {
+      const el = document.getElementById(id);
+      if (el) el.value = valeur;
+    }
+    // Et mémoriser au fil de la frappe : si quoi que ce soit redessine le
+    // formulaire, rien n'est perdu.
+    for (const id of CHAMPS) {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', () => { saisie[id] = el.value; });
+    }
+
     document.querySelectorAll('.cpt-onglet').forEach(b => {
       b.addEventListener('click', () => ouvrirAuth(b.dataset.mode));
     });
@@ -151,7 +221,16 @@
       e.preventDefault();
       soumettre(inscription);
     });
-    setTimeout(() => { const i = document.getElementById('cpt-email'); if (i) i.focus(); }, 40);
+    // Le focus va au premier champ VIDE : sur un formulaire déjà entamé,
+    // ramener le curseur sur l'e-mail ferait reculer l'utilisateur.
+    setTimeout(() => {
+      const champs = ['cpt-email', 'cpt-mdp', 'cpt-tel', 'cpt-adresse',
+                      'cpt-cp', 'cpt-ville'];
+      for (const id of champs) {
+        const el = document.getElementById(id);
+        if (el && !el.value) { el.focus(); return; }
+      }
+    }, 40);
   }
   window.compteOuvrirAuth = ouvrirAuth;
 
@@ -189,6 +268,8 @@
     bouton.textContent = inscription ? `Créer mon compte et démarrer l'essai` : 'Se connecter';
 
     if (d && d.success) {
+      // Ne pas garder le mot de passe en mémoire une fois le compte ouvert.
+      for (const id of CHAMPS) delete saisie[id];
       if (d.licence) appliquer(d.licence);
       fermerEcran();
       rafraichirEcranCourant();

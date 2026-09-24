@@ -300,6 +300,43 @@ def test_ecran_d_accueil_ne_ment_pas_sur_le_backend():
     print("  OK — l'accueil distingue serveur éteint et compte manquant")
 
 
+def test_formulaire_d_inscription_ne_se_redessine_pas():
+    """Le formulaire ne doit JAMAIS être reconstruit sous les doigts.
+
+    Défaut vécu : les sondages périodiques recevaient un 401, ce qui relançait
+    l'arbitrage d'écran, qui détruisait et recréait la modale toutes les trois
+    secondes. Le formulaire se vidait pendant la frappe — l'inscription était
+    tout simplement impossible.
+
+    On vérifie les PROPRIÉTÉS qui l'empêchent, dans le code servi.
+    """
+    compte_js = (_RACINE / "frontend" / "js" / "compte.js").read_text(encoding="utf-8")
+
+    # 1. L'arbitrage ne rouvre pas un écran déjà ouvert.
+    debut = compte_js.index("function arbitrerEcran()")
+    arbitrage = compte_js[debut:debut + 700]
+    assert "ecranOuvert === 'auth'" in arbitrage and "return" in arbitrage, \
+        "arbitrerEcran rouvre l'écran d'inscription même s'il est déjà affiché"
+
+    # 2. ouvrirAuth est idempotente — dernière barrière, quel que soit l'appelant.
+    debut = compte_js.index("function ouvrirAuth(mode)")
+    ouverture = compte_js[debut:debut + 900]
+    assert "modeAuthOuvert === mode" in ouverture, \
+        "ouvrirAuth reconstruit le formulaire même dans le mode déjà affiché"
+
+    # 3. La saisie vit HORS du DOM : un redessin ne peut pas l'effacer, et
+    #    l'onglet « Se connecter » n'affiche pas les champs d'adresse.
+    assert "const saisie = {}" in compte_js and "memoriserSaisie" in compte_js, \
+        "la saisie n'est pas conservée hors du DOM"
+    assert "delete saisie[id]" in compte_js, \
+        "le mot de passe reste en mémoire après la création du compte"
+
+    # 4. Les 401 en rafale ne déclenchent pas une requête par sondage.
+    assert "chargementEnCours" in compte_js and "dernierChargement" in compte_js, \
+        "charger() n'est pas mutualisé : les sondages provoqueraient une rafale"
+    print("  OK — le formulaire résiste aux 401 répétés et conserve la saisie")
+
+
 def test_inscription_ouvre_trois_jours():
     _isoler()
     c = _app()
@@ -803,6 +840,7 @@ def run():
         test_etat_du_moteur_ia_exploitable_par_la_page()
         test_aucune_boucle_de_redirection_sur_401()
         test_ecran_d_accueil_ne_ment_pas_sur_le_backend()
+        test_formulaire_d_inscription_ne_se_redessine_pas()
         test_inscription_ouvre_trois_jours()
         test_champs_obligatoires()
         test_contact_deja_enregistre_refuse()
