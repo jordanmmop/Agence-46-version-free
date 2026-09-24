@@ -132,7 +132,12 @@ def envoyer_email(destinataire: str, sujet: str, corps: str) -> Tuple[bool, str]
                 # STARTTLS par défaut : les identifiants SMTP et la clé
                 # d'abonnement ne doivent pas traverser le réseau en clair.
                 serveur.starttls()
-            if utilisateur:
+            # Authentifier UNIQUEMENT quand il y a de quoi : un relais interne
+            # (`SMTP_SECURITE=aucune`, sans mot de passe) n'annonce pas
+            # l'extension AUTH, et `login()` y échoue avec
+            # « SMTP AUTH extension not supported by server » — un message qui
+            # ne dit pas que le problème est d'avoir voulu s'authentifier.
+            if utilisateur and mot_de_passe:
                 serveur.login(utilisateur, mot_de_passe)
             serveur.send_message(message)
         return True, f"E-mail envoyé à {masquer_email(destinataire)}"

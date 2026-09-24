@@ -332,7 +332,20 @@ de promettre un e-mail qui n'arrivera pas.
 
 ### Configurer l'e-mail (recommandé)
 
-Dans `python/.env` :
+#### Le plus simple : le script
+
+```bash
+cd /opt/agence/app
+sudo -u agence bash scripts/configurer-serveur.sh --envoi
+```
+
+Il ne touche **qu'aux lignes d'envoi** : vos clés Stripe et votre DSN de base
+restent en place, une sauvegarde est faite, le fichier reste en **mode 600**,
+et les secrets se saisissent en aveugle. À la fin, il propose d'**envoyer un
+e-mail de test** — configurer n'est pas envoyer, et un mot de passe refusé ou
+un port filtré par l'hébergeur ne se voit qu'à l'essai.
+
+#### Ou à la main, dans `python/.env`
 
 ```ini
 SMTP_HOTE=smtp.votre-hebergeur.fr
@@ -342,6 +355,13 @@ SMTP_UTILISATEUR=no-reply@votre-domaine.fr
 SMTP_MOTDEPASSE=le-mot-de-passe
 SMTP_EXPEDITEUR=no-reply@votre-domaine.fr
 ```
+
+Chez OVHcloud : `ssl0.ovh.net`, port `587` (STARTTLS) ou `465` avec
+`SMTP_SECURITE=ssl`, l'identifiant étant l'adresse e-mail complète.
+
+> Un relais interne sans authentification se configure avec
+> `SMTP_SECURITE=aucune` et **sans** `SMTP_MOTDEPASSE` : l'application
+> n'essaie alors pas de s'authentifier.
 
 ### Configurer le SMS (facultatif)
 

@@ -262,6 +262,87 @@ def test_panne_d_envoi_n_annule_pas_l_abonnement():
     print("  OK — panne d'envoi : abonnement intact, clé affichée à l'écran")
 
 
+def test_relais_sans_authentification_accepte():
+    """Régression : un relais SMTP interne sans mot de passe était refusé.
+
+    `login()` était appelé dès qu'un identifiant existait. Un relais qui
+    n'annonce pas l'extension AUTH répondait alors « SMTP AUTH extension not
+    supported by server » — un message qui ne dit pas que la faute est
+    d'avoir voulu s'authentifier. Découvert en configurant un vrai serveur.
+    """
+    _isoler()
+    import smtplib
+    from licence import notifications
+
+    class _FauxSMTP:
+        """Relais minimal : refuse l'authentification, accepte le message."""
+        def __init__(self, hote, port, timeout=None):
+            self.connexions = (hote, port)
+            _FauxSMTP.logins = 0
+            _FauxSMTP.envois = 0
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def starttls(self): pass
+        def login(self, utilisateur, mot_de_passe):
+            _FauxSMTP.logins += 1
+            raise smtplib.SMTPNotSupportedError("SMTP AUTH extension not supported")
+        def send_message(self, message): _FauxSMTP.envois += 1
+
+    origine = smtplib.SMTP
+    smtplib.SMTP = _FauxSMTP
+    os.environ.update({"SMTP_HOTE": "relais.interne", "SMTP_PORT": "25",
+                       "SMTP_SECURITE": "aucune",
+                       "SMTP_UTILISATEUR": "no-reply@interne",
+                       "SMTP_EXPEDITEUR": "no-reply@interne"})
+    os.environ.pop("SMTP_MOTDEPASSE", None)
+    try:
+        ok, detail = notifications.envoyer_email("client@exemple.fr", "s", "corps")
+        assert ok is True, detail
+        assert _FauxSMTP.logins == 0, "sans mot de passe, aucune authentification"
+        assert _FauxSMTP.envois == 1
+
+        # Avec un mot de passe, l'authentification a bien lieu.
+        os.environ["SMTP_MOTDEPASSE"] = "secret"
+        ok, detail = notifications.envoyer_email("client@exemple.fr", "s", "corps")
+        assert _FauxSMTP.logins == 1 and ok is False
+        assert "impossible" in detail.lower()
+    finally:
+        smtplib.SMTP = origine
+        for nom in ("SMTP_HOTE", "SMTP_PORT", "SMTP_SECURITE", "SMTP_UTILISATEUR",
+                    "SMTP_EXPEDITEUR", "SMTP_MOTDEPASSE"):
+            os.environ.pop(nom, None)
+
+    # Un port illisible ne doit pas non plus remonter jusqu'au paiement.
+    os.environ.update({"SMTP_HOTE": "relais.interne", "SMTP_PORT": "abc"})
+    try:
+        ok, detail = notifications.envoyer_email("client@exemple.fr", "s", "corps")
+        assert ok is False and "expéditeur" in detail.lower()
+    finally:
+        os.environ.pop("SMTP_HOTE", None)
+        os.environ.pop("SMTP_PORT", None)
+    print("  OK — relais sans authentification accepté, port illisible sans casse")
+
+
+def test_script_de_configuration_complete_sans_ecraser():
+    """`--envoi` doit ajouter l'envoi SANS faire ressaisir les clés Stripe."""
+    script = (_RACINE / "scripts" / "configurer-serveur.sh").read_text(encoding="utf-8")
+    assert "--envoi" in script
+    # Le mode ciblé modifie ligne à ligne ; il ne réécrit jamais tout le fichier.
+    assert "definir_variable()" in script
+    assert 'cp -p "$ENV_FICHIER" "$SAUVEGARDE"' in script
+    # Les secrets se saisissent en aveugle.
+    for variable in ("SMTP_MOTDEPASSE", "OVH_APPLICATION_SECRET",
+                     "TWILIO_AUTH_TOKEN", "SMS_AUTORISATION"):
+        assert f'read -r -s -p' in script, "les secrets doivent être saisis en aveugle"
+        assert variable in script, f"le script n'expose pas {variable}"
+    # Le fichier temporaire du remplacement ne doit jamais être lisible.
+    assert 'chmod 600 "$tmp"' in script
+    assert "umask 077" in script
+    # Et le script doit proposer de VÉRIFIER, pas seulement d'écrire.
+    assert "tester_envoi" in script
+    print("  OK — configurer-serveur.sh --envoi complète sans écraser")
+
+
 def test_sans_canal_configure_rien_n_est_annonce_comme_envoye():
     """Aucun SMTP, aucune passerelle : le module le DIT, il ne prétend rien."""
     _isoler()
@@ -692,6 +773,8 @@ def run():
         test_paiement_confirme_emet_et_envoie_la_cle()
         test_un_seul_paiement_une_seule_cle()
         test_panne_d_envoi_n_annule_pas_l_abonnement()
+        test_relais_sans_authentification_accepte()
+        test_script_de_configuration_complete_sans_ecraser()
         test_sans_canal_configure_rien_n_est_annonce_comme_envoye()
         test_la_cle_active_reellement_la_version_pro()
         test_cle_inventee_ou_perimee_refusee()
