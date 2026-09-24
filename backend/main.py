@@ -246,6 +246,12 @@ _COMPTE_PUBLIC = {
     "/api/licence",                       # sert à l'interface à choisir son écran
     "/manifest.json", "/sw.js", "/favicon.ico",
     "/login", "/api/login", "/api/logout",
+    # Écran de PREMIER LANCEMENT (choix du moteur IA local). La fenêtre du
+    # bureau l'ouvre AVANT toute chose — app_window.py démarre sur /setup.
+    # Le fermer rendait l'application inutilisable dès l'installation : la
+    # fenêtre n'affichait que le JSON du refus. Ces routes n'exposent que le
+    # moteur IA choisi et l'URL locale — aucune donnée de compte ni de trading.
+    "/setup",
 }
 # Préfixes ouverts : les pages elles-mêmes et leurs ressources. L'interface
 # doit pouvoir S'AFFICHER pour proposer l'inscription ou le paiement — c'est
@@ -253,7 +259,10 @@ _COMPTE_PUBLIC = {
 _COMPTE_PUBLIC_PREFIXES = ("/icons/", "/css/", "/js/", "/static/",
                            # Un compte SUSPENDU doit pouvoir régulariser :
                            # l'abonnement reste donc joignable en permanence.
-                           "/api/abonnement")
+                           "/api/abonnement",
+                           # /setup/state et /setup/mode : l'écran de premier
+                           # lancement ne peut pas fonctionner sans eux.
+                           "/setup/")
 
 
 def _chemin_ouvert_sans_compte(chemin: str) -> bool:
@@ -303,9 +312,23 @@ async def _compte_middleware(request: Request, call_next):
             return await call_next(request)
 
         from licence.gate import AbonnementRequis, CompteRequis
-        if etat is EtatLicence.COMPTE_REQUIS:
-            return JSONResponse(status_code=401, content=CompteRequis().payload())
-        return JSONResponse(status_code=402, content=AbonnementRequis(etat).payload())
+        refus = (CompteRequis().payload() if etat is EtatLicence.COMPTE_REQUIS
+                 else AbonnementRequis(etat).payload())
+        code = 401 if etat is EtatLicence.COMPTE_REQUIS else 402
+
+        # Une PAGE demandée par le navigateur ne doit JAMAIS recevoir du JSON :
+        # l'utilisateur se retrouve devant `{"error": "Créez un compte…"}` en
+        # texte brut, sans le moindre moyen d'agir. C'est exactement ce qui est
+        # arrivé quand /setup a été fermé par mégarde. On renvoie donc vers la
+        # racine, qui est publique et sait afficher l'écran d'inscription.
+        #
+        # Le test porte sur le CHEMIN, et non sur l'en-tête Accept : une page
+        # ouverte depuis un signet, une redirection ou la fenêtre du bureau
+        # n'annonce pas toujours ce qu'elle attend.
+        chemin = request.url.path
+        if not chemin.startswith("/api/") and chemin != "/":
+            return RedirectResponse(url="/", status_code=302)
+        return JSONResponse(status_code=code, content=refus)
     finally:
         comptes.reinitialiser_compte_courant(jeton_ctx)
 

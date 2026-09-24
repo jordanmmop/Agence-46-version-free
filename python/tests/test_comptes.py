@@ -104,6 +104,74 @@ def test_routes_d_inscription_restent_ouvertes():
 
 # ═══════════════════════════ INSCRIPTION ══════════════════════════════════
 
+def test_aucune_page_ne_renvoie_du_json_brut():
+    """Une NAVIGATION de navigateur ne doit jamais tomber sur du JSON.
+
+    C'est arrivé : la fenêtre du bureau démarre sur /setup, que la garde de
+    compte avait fermé. L'utilisateur n'a vu qu'une ligne de texte —
+    `{"error":"Créez un compte…","compte_requis":true}` — sans aucun moyen
+    d'agir, dès l'installation.
+
+    Deux garanties sont donc vérifiées ici, et sur TOUTES les pages, pas
+    seulement celles qu'on a en tête : une page refusée REDIRIGE vers la
+    racine, qui sait afficher l'écran d'inscription.
+    """
+    _isoler()
+    import backend.main as bm
+    c = _app()
+
+    pages = sorted({
+        getattr(r, "path", "") for r in bm.app.routes
+        if getattr(r, "path", "") and "{" not in getattr(r, "path", "")
+        and "GET" in (getattr(r, "methods", set()) or set())
+        and not getattr(r, "path", "").startswith("/api")
+    })
+    assert pages, "aucune page trouvée — le test ne vérifie rien"
+
+    fautes = []
+    for chemin in pages:
+        r = c.get(chemin, follow_redirects=False)
+        type_contenu = r.headers.get("content-type", "").split(";")[0]
+        if r.status_code >= 400 and type_contenu == "application/json":
+            fautes.append(f"{chemin} → {r.status_code} {type_contenu}")
+    assert not fautes, ("pages renvoyant du JSON brut à un navigateur :\n  "
+                        + "\n  ".join(fautes))
+    print(f"  OK — aucune des {len(pages)} pages ne renvoie de JSON brut")
+
+
+def test_ecran_de_premier_lancement_accessible():
+    """La fenêtre du bureau démarre sur /setup : le fermer rend l'application
+    inutilisable dès l'installation, avant même qu'un compte puisse exister."""
+    _isoler()
+    c = _app()
+
+    r = c.get("/setup")
+    assert r.status_code == 200, f"/setup → {r.status_code} : la fenêtre du bureau serait vide"
+    assert r.headers.get("content-type", "").startswith("text/html")
+    assert c.get("/setup/state").status_code == 200, "/setup/state fermé"
+    assert c.post("/setup/mode", json={"mode": "ollama"}).json()["success"] is True
+
+    # L'écran ne doit laisser filtrer aucune donnée de compte.
+    brut = c.get("/setup/state").text
+    for interdit in ("mot_de_passe", "licence_jeton", "email", "stripe"):
+        assert interdit not in brut.lower(), f"/setup/state expose « {interdit} »"
+
+    # Et la racine, où /setup renvoie ensuite, propose bien l'inscription.
+    racine = c.get("/")
+    assert racine.status_code == 200 and "js/compte.js" in racine.text
+
+    # app_window.py doit toujours démarrer sur une route ouverte : si ce
+    # fichier change d'URL de départ, ce test doit le signaler.
+    fenetre = (_RACINE / "app_window.py").read_text(encoding="utf-8")
+    import re
+    depart = re.search(r'url\s*=\s*f?"http://127\.0\.0\.1:\{?PORT\}?(/[^"]*)"', fenetre)
+    assert depart, "URL de départ de app_window.py introuvable"
+    chemin = depart.group(1)
+    assert c.get(chemin, follow_redirects=False).status_code in (200, 302), \
+        f"la fenêtre du bureau démarre sur {chemin}, qui est fermé"
+    print(f"  OK — /setup accessible, fenêtre du bureau démarre sur {chemin}")
+
+
 def test_inscription_ouvre_trois_jours():
     _isoler()
     c = _app()
@@ -601,6 +669,8 @@ def run():
     try:
         test_sans_compte_application_fermee()
         test_routes_d_inscription_restent_ouvertes()
+        test_aucune_page_ne_renvoie_du_json_brut()
+        test_ecran_de_premier_lancement_accessible()
         test_inscription_ouvre_trois_jours()
         test_champs_obligatoires()
         test_contact_deja_enregistre_refuse()
