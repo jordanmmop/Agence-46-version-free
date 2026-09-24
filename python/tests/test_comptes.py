@@ -172,6 +172,71 @@ def test_ecran_de_premier_lancement_accessible():
     print(f"  OK — /setup accessible, fenêtre du bureau démarre sur {chemin}")
 
 
+def test_toutes_les_routes_de_l_ecran_de_lancement_repondent():
+    """Chaque route que /setup appelle doit répondre SANS compte.
+
+    La liste n'est pas écrite ici : elle est EXTRAITE de la page elle-même.
+    Une liste recopiée à la main vieillit en silence — c'est précisément ce qui
+    est arrivé. Ajouter un `fetch()` à l'écran de lancement fera désormais
+    échouer ce test tant que la route n'est pas ouverte.
+
+    Ce que coûtait le défaut : la page recevait un 401 dépourvu des champs
+    qu'elle lit, affichait « undefined » sous sa barre de progression, et
+    concluait « Ollama non détecté » sur une machine où Ollama était installé.
+    L'installation automatique ne partait jamais.
+    """
+    import re
+    _isoler()
+    import backend.main as bm
+    c = _app()
+
+    appels = sorted(set(re.findall(r"fetch\('([^']+)'", bm._SETUP_HTML)))
+    assert len(appels) >= 8, f"extraction douteuse : {appels}"
+
+    fermees = []
+    for url in appels:
+        r = c.get(url)
+        if r.status_code == 405:                  # route en POST seulement
+            r = c.post(url, json={})
+        if r.status_code in (401, 402):
+            fermees.append(f"{url} → {r.status_code}")
+    assert not fermees, ("l'écran de premier lancement ne peut pas fonctionner, "
+                         "ces routes lui sont fermées :\n  " + "\n  ".join(fermees))
+    print(f"  OK — les {len(appels)} routes de l'écran de lancement répondent sans compte")
+
+
+def test_etat_du_moteur_ia_exploitable_par_la_page():
+    """Les réponses doivent porter les CHAMPS que la page lit.
+
+    Vérifier le code 200 ne suffit pas : un corps valide mais sans `etape` ni
+    `detail` produit exactement le même « undefined » à l'écran.
+    """
+    _isoler()
+    c = _app()
+
+    etat = c.get("/api/ollama/embedded/status").json()
+    # Ce que fait le JavaScript : (s.detail || s.etape)
+    assert (etat.get("detail") or etat.get("etape")) is not None, \
+        "la barre de progression afficherait « undefined »"
+    for champ in ("etape", "progression", "installe", "embarque"):
+        assert champ in etat, f"/api/ollama/embedded/status sans « {champ} »"
+
+    # Les trois branches de détection de la page reposent sur ces champs.
+    ollama = c.get("/api/ollama/status").json()
+    for champ in ("available", "installe"):
+        assert champ in ollama, (
+            f"/api/ollama/status sans « {champ} » : la page conclurait "
+            f"« Ollama non détecté » même sur une machine équipée")
+
+    # Et rien de tout cela ne doit laisser filtrer de données de compte.
+    for url in ("/api/ollama/status", "/api/ollama/embedded/status",
+                "/api/hermes/status"):
+        brut = c.get(url).text.lower()
+        for interdit in ("mot_de_passe", "licence_jeton", "stripe", "@"):
+            assert interdit not in brut, f"{url} expose « {interdit} »"
+    print("  OK — l'état du moteur IA porte les champs lus par la page")
+
+
 def test_inscription_ouvre_trois_jours():
     _isoler()
     c = _app()
@@ -671,6 +736,8 @@ def run():
         test_routes_d_inscription_restent_ouvertes()
         test_aucune_page_ne_renvoie_du_json_brut()
         test_ecran_de_premier_lancement_accessible()
+        test_toutes_les_routes_de_l_ecran_de_lancement_repondent()
+        test_etat_du_moteur_ia_exploitable_par_la_page()
         test_inscription_ouvre_trois_jours()
         test_champs_obligatoires()
         test_contact_deja_enregistre_refuse()

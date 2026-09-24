@@ -262,7 +262,23 @@ _COMPTE_PUBLIC_PREFIXES = ("/icons/", "/css/", "/js/", "/static/",
                            "/api/abonnement",
                            # /setup/state et /setup/mode : l'écran de premier
                            # lancement ne peut pas fonctionner sans eux.
-                           "/setup/")
+                           "/setup/",
+                           # Moteur IA local. L'écran de premier lancement les
+                           # interroge pour détecter, installer et démarrer
+                           # Ollama ou Hermès — AVANT qu'un compte existe.
+                           #
+                           # Les fermer ne « protégeait » rien : la page
+                           # recevait un 401 dépourvu des champs qu'elle lit,
+                           # affichait « undefined » sous sa barre de
+                           # progression et concluait « Ollama non détecté »
+                           # sur une machine où Ollama était bel et bien
+                           # installé. L'installation automatique, elle, ne
+                           # partait jamais.
+                           #
+                           # Ces routes ne touchent qu'au moteur IA de la
+                           # machine : aucune donnée de compte, de portefeuille
+                           # ni de courtier.
+                           "/api/ollama/", "/api/hermes/")
 
 
 def _chemin_ouvert_sans_compte(chemin: str) -> bool:
