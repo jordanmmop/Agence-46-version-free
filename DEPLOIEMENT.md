@@ -213,6 +213,21 @@ FORMULES = {
 C'est le **seul** endroit à modifier : les tarifs et les liens affichés par
 l'interface en découlent.
 
+Sur un serveur déjà installé, les deux variables suivantes évitent de
+recompiler — et permettent de revenir en test aussi facilement :
+
+```ini
+STRIPE_LIEN_MENSUEL=https://buy.stripe.com/VOTRE_LIEN_MENSUEL
+STRIPE_LIEN_ANNUEL=https://buy.stripe.com/VOTRE_LIEN_ANNUEL
+```
+
+Tout lien qui ne commence pas par `https://buy.stripe.com/` est refusé.
+
+> ⚠️ **Alignez la clé et les liens.** Une clé `sk_test_` avec des liens de
+> production ferait payer vos clients **réellement** sans jamais débloquer
+> leur compte. L'application détecte ce mélange et l'affiche dans l'écran
+> d'abonnement comme dans `scripts/verifier-serveur.sh`.
+
 > Les prix (78,79 € et 849,99 €) doivent correspondre **exactement** à ceux
 > configurés chez Stripe : la formule est déduite du **montant encaissé**. Un
 > écart de plus d'un centime et le paiement n'est rattaché à aucune formule.

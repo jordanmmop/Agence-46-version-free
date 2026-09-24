@@ -688,6 +688,126 @@ def test_secrets_stripe_jamais_exposes():
     print("  OK — les secrets Stripe ne sortent par aucune route")
 
 
+def test_liens_de_paiement_surchargeables_et_valides():
+    """Passer en production ne doit pas exiger de recompiler — ni permettre
+    d'envoyer un client payer ailleurs que chez Stripe."""
+    import importlib
+    ancien = {k: os.environ.get(k) for k in ("STRIPE_LIEN_MENSUEL", "STRIPE_LIEN_ANNUEL")}
+    try:
+        import licence.config as lc
+
+        # 1. Sans variable : les liens du fichier de configuration.
+        for k in ancien:
+            os.environ.pop(k, None)
+        importlib.reload(lc)
+        assert lc.lien_de_test(lc.FORMULES["mensuel"]["lien_paiement"]), \
+            "les liens livrés devraient être des liens de test"
+
+        # 2. Avec variables : liens de production, sans recompilation.
+        os.environ["STRIPE_LIEN_MENSUEL"] = "https://buy.stripe.com/4gwPRODM"
+        os.environ["STRIPE_LIEN_ANNUEL"] = "https://buy.stripe.com/8xyPRODA"
+        importlib.reload(lc)
+        assert lc.FORMULES["mensuel"]["lien_paiement"].endswith("4gwPRODM")
+        assert not lc.lien_de_test(lc.FORMULES["annuel"]["lien_paiement"])
+
+        # 3. Lien hostile : REFUSÉ, retour au défaut. Une variable
+        #    d'environnement détournée ne doit pas pouvoir rediriger un
+        #    paiement vers un site tiers.
+        for hostile in ("https://paiement-pirate.example/voler",
+                        "http://buy.stripe.com/pasdehttps",
+                        "https://buy.stripe.com.pirate.example/x"):
+            os.environ["STRIPE_LIEN_MENSUEL"] = hostile
+            importlib.reload(lc)
+            assert lc.FORMULES["mensuel"]["lien_paiement"].startswith(
+                lc.PREFIXE_LIEN_STRIPE), f"lien hostile accepté : {hostile}"
+            assert hostile not in lc.FORMULES["mensuel"]["lien_paiement"]
+    finally:
+        for k, v in ancien.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        import licence.config as lc
+        importlib.reload(lc)
+    print("  OK — liens surchargeables, tout lien hors buy.stripe.com refusé")
+
+
+def test_incoherence_cle_et_liens_detectee():
+    """Le mélange clé / liens est SILENCIEUX et coûteux : il faut le dire.
+
+    Une clé de test avec des liens de production fait payer le client
+    réellement, sans jamais confirmer le paiement : son compte reste suspendu
+    alors qu'il a été débité.
+    """
+    import importlib
+    sauve = {k: os.environ.get(k) for k in
+             ("STRIPE_SECRET_KEY", "STRIPE_LIEN_MENSUEL", "STRIPE_LIEN_ANNUEL")}
+    LIVE = {"STRIPE_LIEN_MENSUEL": "https://buy.stripe.com/4gwPRODM",
+            "STRIPE_LIEN_ANNUEL": "https://buy.stripe.com/8xyPRODA"}
+    try:
+        import licence.config as lc
+        import licence.stripe_paiement as sp
+
+        def alerte(env):
+            for k in sauve:
+                os.environ.pop(k, None)
+            os.environ.update(env)
+            importlib.reload(lc)
+            importlib.reload(sp)
+            return sp.incoherence_environnement()
+
+        assert alerte({"STRIPE_SECRET_KEY": "sk_test_x"}) == "", \
+            "test + test ne devrait pas alerter"
+        assert alerte({"STRIPE_SECRET_KEY": "sk_live_x", **LIVE}) == "", \
+            "live + live ne devrait pas alerter"
+
+        grave = alerte({"STRIPE_SECRET_KEY": "sk_test_x", **LIVE})
+        assert "DANGER" in grave and "suspendu" in grave, grave
+
+        manque = alerte({"STRIPE_SECRET_KEY": "sk_live_x"})
+        assert "TEST" in manque and "encaiss" in manque, manque
+
+        melange = alerte({"STRIPE_SECRET_KEY": "sk_live_x",
+                          "STRIPE_LIEN_MENSUEL": LIVE["STRIPE_LIEN_MENSUEL"]})
+        assert "mélangent" in melange, melange
+
+        # Sans clé configurée, aucune alerte : rien n'est encore branché.
+        assert alerte({}) == ""
+    finally:
+        for k, v in sauve.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        import licence.config as lc
+        import licence.stripe_paiement as sp
+        importlib.reload(lc)
+        importlib.reload(sp)
+    print("  OK — clé et liens désaccordés : détecté et expliqué")
+
+
+def test_version_4_1_0_coherente():
+    """La version et sa note doivent exister et concorder."""
+    version = (_RACINE / "VERSION").read_text(encoding="utf-8").strip()
+    assert version == "4.1.0", f"VERSION vaut {version!r}"
+
+    note = _RACINE / f"RELEASE_NOTES_{version}.md"
+    assert note.is_file(), f"note de version manquante : {note.name}"
+    texte = note.read_text(encoding="utf-8")
+    assert version in texte.splitlines()[0], "le titre ne porte pas la version"
+
+    # La note doit annoncer ce que cette version change réellement.
+    for element in ("3 jours", "78,79", "849,99", "PBKDF2", "carte bancaire",
+                    "Stripe", "IPv4"):
+        assert element in texte, f"la note ne mentionne pas « {element} »"
+
+    # Et les tarifs annoncés doivent être ceux appliqués.
+    from licence import config as lconfig
+    assert f"{lconfig.FORMULES['mensuel']['prix']:.2f}".replace(".", ",") in texte
+    assert f"{lconfig.FORMULES['annuel']['prix']:.2f}".replace(".", ",") in texte
+    print(f"  OK — version {version}, note présente et cohérente avec les tarifs")
+
+
 def test_liens_de_paiement_exacts():
     """Les deux liens fournis, à la lettre."""
     from licence import config as lconfig
@@ -860,6 +980,9 @@ def run():
         test_renouvellement_prolonge_sans_perdre_de_jours()
         test_secrets_stripe_jamais_exposes()
         test_liens_de_paiement_exacts()
+        test_liens_de_paiement_surchargeables_et_valides()
+        test_incoherence_cle_et_liens_detectee()
+        test_version_4_1_0_coherente()
         test_cookie_secure_selon_le_transport()
         test_origines_cors_restreignables()
         test_guide_de_deploiement_complet()

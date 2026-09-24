@@ -340,11 +340,16 @@
       encore configurée sur ce serveur : un règlement ne débloquera pas le
       compte tant qu'elle ne l'est pas.</p>`;
 
+    // Clé et liens qui ne parlent pas du même monde : le cas le plus coûteux
+    // est silencieux (le client paie, rien ne se débloque). On le dit.
+    const avertissementIncoherence = paiement.incoherence ? `
+      <p class="cpt-avert">⚠️ ${E(paiement.incoherence)}</p>` : '';
+
     ouvrirEcran('paywall', `
       <div class="lic-head"><span>${expire ? 'Abonnement expiré' : 'Essai terminé'}</span></div>
       <div class="lic-body">
         <p class="lic-intro">${E((etat && etat.message) || '')}</p>
-        ${avertissementTest}${avertissementVerif}
+        ${avertissementTest}${avertissementVerif}${avertissementIncoherence}
 
         <div class="cpt-formules">${cartes}</div>
 
@@ -424,6 +429,7 @@
         multi-agents, les automatisations et les paramètres avancés.</p>
         ${paiement.mode_test ? `<p class="cpt-avert">⚠️ Liens de paiement en
           environnement de <strong>test</strong> Stripe.</p>` : ''}
+        ${paiement.incoherence ? `<p class="cpt-avert">⚠️ ${E(paiement.incoherence)}</p>` : ''}
         <div class="cpt-formules">${cartes}</div>
         <p class="cpt-note">Paiement sur les pages sécurisées de Stripe.
         Aucune donnée de carte n'est saisie dans cette application.</p>

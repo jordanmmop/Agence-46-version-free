@@ -90,7 +90,7 @@ def formules_publiques(compte_id: str = "") -> Dict[str, Any]:
             separateur = "&" if "?" in lien else "?"
             lien = f"{lien}{separateur}client_reference_id={compte_id}"
         sortie[cle] = {**f, "lien_paiement": lien,
-                       "test": "/test_" in f["lien_paiement"]}
+                       "test": lconfig.lien_de_test(f["lien_paiement"])}
     return sortie
 
 
@@ -283,6 +283,48 @@ def traiter_webhook(charge: bytes, entete_signature: str) -> Dict[str, Any]:
 
 # ═══════════════════════════ ÉTAT POUR L'INTERFACE ════════════════════════
 
+def incoherence_environnement() -> str:
+    """Les liens de paiement et la clé secrète parlent-ils du même monde ?
+
+    Renvoie un message d'alerte, ou une chaîne vide si tout concorde.
+
+    Ces deux réglages viennent d'endroits différents — un fichier de
+    configuration et une variable d'environnement — et rien n'oblige à les
+    changer ensemble. Or les mélanger ne produit AUCUNE erreur visible au
+    moment de la configuration : la panne n'apparaît qu'au premier client.
+
+    Le cas grave est le second :
+
+    - clé de TEST + liens de PRODUCTION : le client paie RÉELLEMENT, la
+      vérification interroge l'API de test, le paiement n'est jamais confirmé
+      et le compte reste suspendu. Vous encaissez sans rien livrer.
+    - clé de PRODUCTION + liens de TEST : personne ne paie vraiment, et aucun
+      abonnement ne s'active. Manque à gagner, sans dommage pour le client.
+    """
+    cle = cle_secrete()
+    if not cle:
+        return ""
+    liens_de_test = [f["id"] for f in lconfig.FORMULES.values()
+                     if lconfig.lien_de_test(f["lien_paiement"])]
+    tous_en_test = len(liens_de_test) == len(lconfig.FORMULES)
+    aucun_en_test = not liens_de_test
+
+    if cle.startswith("sk_test_") and aucun_en_test:
+        return ("DANGER : clé Stripe de TEST avec des liens de paiement de "
+                "PRODUCTION. Vos clients paieront réellement, mais le paiement "
+                "ne pourra jamais être confirmé et leur compte restera "
+                "suspendu. Utilisez une clé « sk_live_ ».")
+    if cle.startswith("sk_live_") and tous_en_test:
+        return ("Clé Stripe de PRODUCTION avec des liens de paiement de TEST : "
+                "aucun règlement réel ne sera encaissé. Remplacez les liens "
+                "(STRIPE_LIEN_MENSUEL / STRIPE_LIEN_ANNUEL, ou "
+                "licence/config.py).")
+    if liens_de_test and not tous_en_test:
+        return ("Les formules mélangent liens de test et liens de production : "
+                + ", ".join(liens_de_test) + " en test. Alignez-les.")
+    return ""
+
+
 def etat_paiement(compte_id: str = "") -> Dict[str, Any]:
     """Ce que l'interface a besoin de savoir pour afficher l'écran d'abonnement.
 
@@ -298,5 +340,7 @@ def etat_paiement(compte_id: str = "") -> Dict[str, Any]:
         # Vrai tant que les liens pointent sur l'environnement de test Stripe :
         # l'interface doit le dire, sinon un utilisateur croirait avoir payé.
         "mode_test": any(f.get("test") for f in formules.values()),
+        # Message d'alerte si la clé et les liens ne parlent pas du même monde.
+        "incoherence": incoherence_environnement(),
         "essai_jours": lconfig.TRIAL_DUREE_JOURS,
     }

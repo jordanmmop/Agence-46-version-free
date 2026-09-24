@@ -65,6 +65,11 @@ else
     && vert "STRIPE_WEBHOOK_SECRET lue (webhook vérifiable)" \
     || rouge "STRIPE_WEBHOOK_SECRET absente — AUCUN paiement ne sera confirmé"
 
+  INCOHERENCE="$(printf '%s' "$ABO" | champ incoherence)"
+  if [[ -n "$INCOHERENCE" ]]; then
+    rouge "$INCOHERENCE"
+  fi
+
   if [[ "$(printf '%s' "$ABO" | champ mode_test)" == "True" ]]; then
     jaune "liens de paiement encore en mode TEST — aucun encaissement réel"
     jaune "  → remplacez-les dans python/licence/config.py"

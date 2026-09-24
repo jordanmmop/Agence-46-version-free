@@ -372,6 +372,7 @@ d'environnement de l'hébergeur — sans toucher une ligne de code.
 ├── build_exe.bat          compile l'application seule
 ├── runtime/               moteurs embarqués (généré, non versionné)
 ├── dist/                  sortie du build (application + installateur/)
+├── RELEASE_NOTES_4.1.0.md note de version 4.1.0 (comptes, essai, abonnement)
 ├── RELEASE_NOTES_TRIAL.md note de version de l'essai (limites appliquées)
 ├── VERSION                numéro de version — source unique
 ├── agence.spec            build PyInstaller (exe Windows)

@@ -152,11 +152,54 @@ MOT_DE_PASSE_MIN = 8
 # l'utilisateur y saisit sa carte, Stripe encaisse, et l'application n'apprend
 # que le RÉSULTAT (payé / non payé) — jamais le moyen de paiement.
 
-# Les deux formules proposées dans l'application.
+# ── Liens de paiement Stripe ──────────────────────────────────────────────
 #
-# ⚠️ Les liens ci-dessous sont des liens Stripe de TEST (« /test_ ») : ils
-# n'encaissent aucun paiement réel. Les remplacer par les liens de production
-# avant toute mise en vente — c'est le SEUL changement à faire ici.
+# Un lien de paiement n'est PAS un secret : c'est une URL publique, faite pour
+# être partagée. Elle a donc sa place ici, et peut aussi être remplacée sans
+# recompiler, par variable d'environnement :
+#
+#     STRIPE_LIEN_MENSUEL=https://buy.stripe.com/VOTRE_LIEN
+#     STRIPE_LIEN_ANNUEL=https://buy.stripe.com/VOTRE_LIEN
+#
+# C'est ce qui permet de passer en production sur un serveur déjà installé —
+# et de revenir en test — sans reconstruire l'application.
+#
+# ⚠️ VALEURS PAR DÉFAUT : liens Stripe de TEST (« /test_ »). Ils n'encaissent
+# AUCUN paiement réel. Créez vos liens en mode « Live » dans le tableau de bord
+# Stripe et mettez-les ici (ou dans les variables ci-dessus) avant toute mise
+# en vente. L'application signale d'elle-même qu'elle est en mode test, dans
+# l'écran d'abonnement et dans `scripts/verifier-serveur.sh`.
+
+LIEN_PAIEMENT_MENSUEL_DEFAUT = "https://buy.stripe.com/test_aFaaEX7ol6Nc9ZsewvdZ601"
+LIEN_PAIEMENT_ANNUEL_DEFAUT = "https://buy.stripe.com/test_00w8wP3851sS0oS1JJdZ602"
+
+# Préfixe exigé pour tout lien de paiement. Un lien mal collé (page du tableau
+# de bord, lien raccourci, adresse d'hameçonnage glissée dans une variable
+# d'environnement) est REFUSÉ et l'on retombe sur le défaut : l'application ne
+# doit jamais envoyer un client payer ailleurs que chez Stripe.
+PREFIXE_LIEN_STRIPE = "https://buy.stripe.com/"
+
+
+def _lien_paiement(variable: str, defaut: str) -> str:
+    """Lien de paiement retenu : la variable d'environnement, sinon le défaut."""
+    import logging
+    import os
+    brut = (os.getenv(variable, "") or "").strip()
+    if not brut:
+        return defaut
+    if not brut.startswith(PREFIXE_LIEN_STRIPE):
+        logging.getLogger(__name__).error(
+            "[abonnement] %s ignorée : un lien de paiement doit commencer par "
+            "« %s » (reçu : %.40s…)", variable, PREFIXE_LIEN_STRIPE, brut)
+        return defaut
+    return brut
+
+
+def lien_de_test(lien: str) -> bool:
+    """Ce lien pointe-t-il vers l'environnement de test de Stripe ?"""
+    return "/test_" in (lien or "")
+
+
 FORMULES = {
     "mensuel": {
         "id": "mensuel",
@@ -165,7 +208,8 @@ FORMULES = {
         "devise": "EUR",
         "periode": "mois",
         "description": "78,79 € par mois, sans engagement de durée.",
-        "lien_paiement": "https://buy.stripe.com/test_aFaaEX7ol6Nc9ZsewvdZ601",
+        "lien_paiement": _lien_paiement("STRIPE_LIEN_MENSUEL",
+                                        LIEN_PAIEMENT_MENSUEL_DEFAUT),
     },
     "annuel": {
         "id": "annuel",
@@ -175,7 +219,8 @@ FORMULES = {
         "periode": "an",
         "description": "849,99 € par an, soit environ 10 % d'économie "
                        "par rapport au mensuel.",
-        "lien_paiement": "https://buy.stripe.com/test_00w8wP3851sS0oS1JJdZ602",
+        "lien_paiement": _lien_paiement("STRIPE_LIEN_ANNUEL",
+                                        LIEN_PAIEMENT_ANNUEL_DEFAUT),
     },
 }
 
