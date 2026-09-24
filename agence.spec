@@ -109,6 +109,11 @@ hiddenimports = _app_modules + [
     "licence.comptes",
     "licence.depot_postgres",
     "licence.stripe_paiement",
+    # Clés d'abonnement : sans ces trois modules, un abonné payé ne recevrait
+    # aucune clé et ne pourrait pas activer sa version Pro.
+    "licence.cles",
+    "licence.notifications",
+    "licence.emetteur",
     "backend.routes.licence",
     "backend.routes.comptes",
     "backend.routes.abonnement",

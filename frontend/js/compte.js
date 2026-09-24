@@ -314,6 +314,75 @@
   };
 
   // ═══════════════ MUR DE PAIEMENT ═══════════════
+  // ═══════════════ CLÉ D'ABONNEMENT ═══════════════
+  // Ce que l'utilisateur reçoit une fois son règlement confirmé. Le texte
+  // décrit les canaux RÉELLEMENT configurés sur le serveur : promettre un
+  // e-mail qu'aucun SMTP n'enverra, c'est fabriquer une attente qui ne se
+  // résoudra jamais.
+  function blocRemiseCle(paiement) {
+    const remise = (paiement && paiement.remise_cle) || {};
+    const canaux = [];
+    if (remise.email) canaux.push('par e-mail');
+    if (remise.sms) canaux.push('par SMS');
+    const phrase = canaux.length
+      ? `Dès votre paiement confirmé, votre <strong>clé d'abonnement</strong>
+         vous est envoyée ${canaux.join(' et ')}, sur les coordonnées de votre
+         compte. Collez-la ensuite dans « Passer à la version Pro ».`
+      : `Dès votre paiement confirmé, votre <strong>clé d'abonnement</strong>
+         s'affiche sur la page de retour. Notez-la : aucun envoi automatique
+         n'est configuré sur ce serveur.`;
+    return `<p class="cpt-note">${phrase}</p>
+      <div class="lic-actions">
+        <button class="lic-btn lic-btn-ghost" id="cpt-cle-renvoi">
+          Je n'ai pas reçu ma clé
+        </button>
+      </div>
+      <div id="cpt-cle" class="cpt-erreur"></div>`;
+  }
+
+  function brancherRenvoiCle() {
+    const bouton = document.getElementById('cpt-cle-renvoi');
+    if (bouton) bouton.addEventListener('click', renvoyerCle);
+  }
+
+  // Redemander une clé RÉÉMET : l'ancienne cesse de fonctionner. C'est
+  // volontaire, et c'est annoncé avant le clic comme après.
+  async function renvoyerCle() {
+    const sortie = document.getElementById('cpt-cle');
+    const bouton = document.getElementById('cpt-cle-renvoi');
+    if (!sortie) return;
+    sortie.textContent = 'Émission d\'une nouvelle clé…';
+    if (bouton) bouton.disabled = true;
+    let d = {};
+    try {
+      const r = await fetch('/api/abonnement/cle', { method: 'POST' });
+      d = await r.json();
+    } catch (e) {
+      sortie.innerHTML = '❌ Serveur injoignable.';
+      if (bouton) bouton.disabled = false;
+      return;
+    }
+    if (bouton) bouton.disabled = false;
+    if (!d.success) {
+      sortie.innerHTML = '❌ ' + E(d.error || 'Clé indisponible.');
+      return;
+    }
+    // La clé n'est lisible QU'ICI : la base n'en garde que l'empreinte.
+    sortie.innerHTML = `
+      <div class="cpt-cle-boite">
+        <div class="cpt-cle-lib">Votre nouvelle clé d'abonnement</div>
+        <div class="cpt-cle-val" id="cpt-cle-val">${E(d.cle)}</div>
+        <div class="cpt-cle-aide">${E(d.message || '')}
+        ${E(d.avertissement || '')} Conservez-la : elle ne pourra pas être
+        réaffichée.</div>
+      </div>`;
+    const val = document.getElementById('cpt-cle-val');
+    if (val && navigator.clipboard) {
+      navigator.clipboard.writeText(d.cle).catch(() => {});
+    }
+  }
+  window.compteRenvoyerCle = renvoyerCle;
+
   function ouvrirPaywall() {
     const paiement = (etat && etat.paiement) || {};
     const formules = paiement.formules || {};
@@ -357,6 +426,7 @@
         Stripe. Une fois le règlement confirmé, votre compte passe en
         <strong>abonné</strong> et l'intégralité des agents IA et des
         fonctionnalités avancées est débloquée.</p>
+        ${blocRemiseCle(paiement)}
 
         <div class="lic-actions">
           <button class="lic-btn lic-btn-ghost" id="cpt-deja-paye">J'ai payé — vérifier</button>
@@ -368,6 +438,7 @@
 
     document.getElementById('cpt-deja-paye').addEventListener('click', verifierPaiement);
     document.getElementById('cpt-changer-compte').addEventListener('click', window.compteDeconnexion);
+    brancherRenvoiCle();
   }
   window.compteOuvrirPaywall = ouvrirPaywall;
 
@@ -433,9 +504,11 @@
         <div class="cpt-formules">${cartes}</div>
         <p class="cpt-note">Paiement sur les pages sécurisées de Stripe.
         Aucune donnée de carte n'est saisie dans cette application.</p>
+        ${blocRemiseCle(paiement)}
         ${typeof window.licenceBlocStore === 'function' ? window.licenceBlocStore() : ''}
       </div>`, true);
     document.getElementById('cpt-fermer').addEventListener('click', fermerEcran);
+    brancherRenvoiCle();
   }
   window.compteOuvrirAbonnement = ouvrirAbonnement;
 

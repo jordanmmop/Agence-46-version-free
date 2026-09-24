@@ -70,8 +70,30 @@ CLE_PUBLIQUE_EMETTEUR = ""
 
 
 def _cle_publique() -> Optional[bytes]:
-    """Clé publique de l'émetteur, ou None si aucune n'est configurée."""
+    """Clé publique de l'émetteur, ou None si aucune n'est configurée.
+
+    Trois origines, de la plus explicite à la plus locale :
+
+    1. `AGENCE_LICENCE_PUBKEY` — la clé de l'émetteur du parc, livrée aux
+       postes. Prioritaire : un administrateur qui la renseigne veut que SEUL
+       cet émetteur soit reconnu.
+    2. `CLE_PUBLIQUE_EMETTEUR` — la même, figée dans le paquet distribué.
+    3. La clé publique de l'émetteur LOCAL, quand cette installation en a un
+       (voir `licence/emetteur.py`). C'est ce qui permet à une installation
+       autonome de reconnaître les jetons qu'elle s'est signés après
+       validation d'une clé d'abonnement en base — sans quoi une activation
+       par clé ne pourrait aboutir nulle part. Elle n'est consultée qu'à
+       défaut des deux précédentes : brancher un émetteur central n'ouvre
+       donc pas, au passage, la porte aux licences locales.
+    """
     brut = (os.getenv("AGENCE_LICENCE_PUBKEY", "") or CLE_PUBLIQUE_EMETTEUR).strip()
+    if not brut:
+        try:
+            from licence import emetteur
+            brut = emetteur.cle_publique_hex().strip()
+        except Exception as e:                  # émetteur absent ou illisible
+            logger.debug("[licence] Aucun émetteur local : %s", e)
+            brut = ""
     if not brut:
         return None
     try:

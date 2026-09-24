@@ -158,14 +158,39 @@ c'est ce qui empêche de rouvrir un essai indéfiniment.
 
 Le paiement passe par Stripe. **Rien de ce qui vient du navigateur ne vaut
 preuve de paiement** : seul un webhook Stripe *signé* (`STRIPE_WEBHOOK_SECRET`)
-ou une relecture de session via l'API (`STRIPE_SECRET_KEY`) ouvre les droits,
-et la formule est déduite du **montant réellement encaissé**. Sans ces
-secrets, aucun paiement ne peut être confirmé et l'application le dit.
+ou une relecture de session via l'API (`STRIPE_SECRET_KEY`) ouvre les droits.
+La formule est reconnue au **montant réellement encaissé**, et — pendant les
+3 jours d'essai Stripe, où ce montant vaut zéro — à la **périodicité** de
+l'abonnement. Sans ces secrets, aucun paiement ne peut être confirmé et
+l'application le dit.
 
 Les liens de paiement livrés sont ceux de **production** : ils encaissent des
 règlements réels, et accordent 3 jours d'essai Stripe avant le premier
 prélèvement. Ils se remplacent dans `python/licence/config.py`, ou sans
 recompiler par `STRIPE_LIEN_MENSUEL` / `STRIPE_LIEN_ANNUEL`.
+
+### La clé d'abonnement
+
+Dès qu'un règlement est confirmé, l'application **émet une clé d'abonnement**
+et l'**envoie par e-mail et par SMS** sur les coordonnées du compte :
+
+```
+AGF-7K3QM-9XZ2P-R4TB8
+```
+
+L'abonné la colle dans « Passer à la version Pro » : son installation
+enregistre alors une licence signée et fonctionne **hors ligne** jusqu'au
+terme. Une seule clé est émise par règlement, et la base n'en conserve que
+l'**empreinte** — une clé perdue se remplace, elle ne se réaffiche pas.
+
+Sans SMTP ni passerelle SMS configurés, la clé s'affiche sur la page de retour
+du paiement et reste réémettable depuis l'application (« Je n'ai pas reçu ma
+clé ») : l'interface le dit au lieu de promettre un e-mail qui n'arrivera pas.
+Configuration : [`DEPLOIEMENT.md`](DEPLOIEMENT.md), section 4 bis.
+
+Côté administrateur, `scripts/abonnement.py` permet de consulter l'état d'un
+compte, de réémettre une clé, ou d'ouvrir des droits pour un règlement
+constaté dans le tableau de bord Stripe.
 
 **Mise en ligne sur votre serveur** (Stripe, webhook, HTTPS, systemd, nginx,
 sauvegardes) : [`DEPLOIEMENT.md`](DEPLOIEMENT.md).
@@ -252,11 +277,15 @@ Une licence valide reste valable **hors ligne** jusqu'à son expiration.
 
 ### Abonnement
 
-L'architecture est en place, mais **aucun prestataire de paiement n'est
-raccordé à ce jour** : rien n'est simulé, et l'activation dit ce qui manque.
-Deux chemins sont prévus — un émetteur HTTPS (`LICENCE_API_URL`) ou
-l'extension Microsoft Store. Une clé déjà en votre possession s'active depuis
-**Réglages ⚙️ → Offre & abonnement**.
+Le paiement passe par **Stripe** (voir plus haut). Un règlement confirmé ouvre
+les droits du compte et fait parvenir une **clé d'abonnement** à son
+titulaire ; cette clé s'active depuis **Réglages ⚙️ → Offre & abonnement**,
+et le serveur signe alors la licence qui rend l'installation autonome.
+
+Deux autres chemins restent prévus mais **ne sont pas raccordés** : un
+émetteur de licences HTTPS externe (`LICENCE_API_URL`) et l'extension
+Microsoft Store (SDK Windows Store requis). L'activation dit ce qui manque
+plutôt que de simuler quoi que ce soit.
 
 L'application est également disponible sur le
 [Microsoft Store](https://apps.microsoft.com/detail/9nltgfr2btsp?hl=fr-FR&gl=FR).
@@ -334,6 +363,9 @@ d'environnement de l'hébergeur — sans toucher une ligne de code.
 │   │   ├── gate.py            feature gate : agents, quotas, fonctionnalités
 │   │   ├── abonnement.py      état de licence, activation, identité du compte
 │   │   ├── verification.py    licence signée Ed25519 (clé PUBLIQUE embarquée)
+│   │   ├── emetteur.py        signature des licences (clé PRIVÉE hors dépôt)
+│   │   ├── cles.py            clés d'abonnement AGF-… (empreinte seule en base)
+│   │   ├── notifications.py   remise de la clé par e-mail et SMS
 │   │   └── quota.py           compteur de requêtes, par compte, en base
 │   ├── utils/
 │   │   ├── auto_trader.py     boucle autonome (analyse → protections → ordre)
@@ -368,11 +400,13 @@ d'environnement de l'hébergeur — sans toucher une ligne de code.
 │   ├── infos_apres.txt        page affichée après l'installation
 │   └── updates/               format du manifeste de mise à jour
 ├── scripts/
+│   ├── abonnement.py          administration des abonnements et des clés
 │   └── build_installer.bat    chaîne complète : application + installeur
 ├── build_installer.bat    raccourci à double-cliquer (appelle scripts/)
 ├── build_exe.bat          compile l'application seule
 ├── runtime/               moteurs embarqués (généré, non versionné)
 ├── dist/                  sortie du build (application + installateur/)
+├── RELEASE_NOTES_4.2.0.md note de version 4.2.0 (clés d'abonnement, envoi)
 ├── RELEASE_NOTES_4.1.0.md note de version 4.1.0 (comptes, essai, abonnement)
 ├── RELEASE_NOTES_TRIAL.md note de version de l'essai (limites appliquées)
 ├── VERSION                numéro de version — source unique

@@ -22,8 +22,8 @@ renseigner son URL :
     AGENCE_UPDATE_URL=https://exemple.tld/agence/derniere.json
 
     {
-      "version": "4.1.0",
-      "url": "https://exemple.tld/AgenceNumerique-Setup-4.1.0.exe",
+      "version": "4.2.0",
+      "url": "https://exemple.tld/AgenceNumerique-Setup-4.2.0.exe",
       "notes": "Correction du calcul de drawdown",
       "obligatoire": false,
       "sha256": "…"

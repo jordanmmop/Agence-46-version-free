@@ -230,8 +230,11 @@ Tout lien qui ne commence pas par `https://buy.stripe.com/` est refusé.
 > d'abonnement comme dans `scripts/verifier-serveur.sh`.
 
 > Les prix (78,79 € et 849,99 €) doivent correspondre **exactement** à ceux
-> configurés chez Stripe : la formule est déduite du **montant encaissé**. Un
-> écart de plus d'un centime et le paiement n'est rattaché à aucune formule.
+> configurés chez Stripe. La formule est reconnue d'abord au **montant
+> encaissé**, puis — quand il vaut zéro, ce qui est le cas pendant les 3 jours
+> d'essai Stripe — à la **périodicité** de l'abonnement (`month` / `year`).
+> Un montant inattendu ET une périodicité illisible font retomber sur la
+> formule mensuelle, avec une erreur dans le journal.
 
 ### 3.2 URL de succès
 
@@ -302,6 +305,128 @@ sudo chmod 600 /opt/agence/app/python/.env
 
 `BACKEND_HOST=127.0.0.1` : l'application n'écoute **que** en local, nginx
 étant seul exposé. Ne laissez pas `0.0.0.0` sur un serveur public.
+
+---
+
+## 4 bis. Remise des clés d'abonnement (e-mail / SMS)
+
+### Ce qui se passe après un paiement
+
+1. Stripe confirme le règlement (webhook signé, ou relecture de session).
+2. L'application ouvre les droits Pro du compte.
+3. Elle **émet une clé d'abonnement** : `AGF-XXXXX-XXXXX-XXXXX`.
+4. Elle l'envoie **par e-mail et par SMS**, sur les coordonnées du compte.
+5. L'abonné la colle dans « Passer à la version Pro » : son installation
+   enregistre alors une licence signée et fonctionne hors ligne jusqu'au terme.
+
+Une clé n'est émise **qu'une fois par règlement** : le webhook et le retour du
+navigateur annoncent le même paiement, sans quoi l'abonné recevrait deux clés
+et deux SMS.
+
+### Sans configuration d'envoi
+
+Rien n'est cassé : la clé est **affichée sur la page de retour** du paiement
+et reste réémettable depuis l'application (« Je n'ai pas reçu ma clé »).
+L'interface annonce alors qu'aucun envoi automatique n'est configuré, au lieu
+de promettre un e-mail qui n'arrivera pas.
+
+### Configurer l'e-mail (recommandé)
+
+Dans `python/.env` :
+
+```ini
+SMTP_HOTE=smtp.votre-hebergeur.fr
+SMTP_PORT=587
+SMTP_SECURITE=starttls
+SMTP_UTILISATEUR=no-reply@votre-domaine.fr
+SMTP_MOTDEPASSE=le-mot-de-passe
+SMTP_EXPEDITEUR=no-reply@votre-domaine.fr
+```
+
+### Configurer le SMS (facultatif)
+
+Trois passerelles sont reconnues. Le fournisseur est déduit des variables
+présentes ; `SMS_FOURNISSEUR` ne sert qu'à trancher entre plusieurs.
+
+```ini
+# Twilio
+TWILIO_ACCOUNT_SID=ACxxxxxxxx
+TWILIO_AUTH_TOKEN=xxxxxxxx
+TWILIO_EXPEDITEUR=+33xxxxxxxxx
+
+# ou OVHcloud SMS
+OVH_APPLICATION_KEY=xxxx
+OVH_APPLICATION_SECRET=xxxx
+OVH_CONSUMER_KEY=xxxx
+OVH_SERVICE_SMS=sms-xx99999-1
+OVH_EXPEDITEUR=AgenceFin
+
+# ou n'importe quelle passerelle : POST JSON {destinataire, message}
+SMS_URL=https://votre-passerelle/envoyer
+SMS_AUTORISATION=Bearer xxxx
+```
+
+Vérifiez ensuite ce que le serveur voit réellement :
+
+```bash
+sudo -u agence python scripts/abonnement.py canaux
+```
+
+### Rattraper un abonné qui n'a rien reçu
+
+C'est le cas d'un règlement encaissé avant que le webhook ne soit configuré,
+ou d'un e-mail perdu.
+
+```bash
+# Où en est ce compte, et quelles clés lui ont été émises ?
+sudo -u agence python scripts/abonnement.py etat alice@exemple.fr
+
+# Le compte est abonné mais n'a pas sa clé : en émettre une nouvelle
+# (l'ancienne est révoquée) et la lui envoyer.
+sudo -u agence python scripts/abonnement.py cle alice@exemple.fr
+
+# Le paiement est visible dans Stripe mais le compte est resté fermé :
+# ouvrir les droits, en gardant la trace du règlement.
+sudo -u agence python scripts/abonnement.py activer alice@exemple.fr \
+     --formule annuel --reference cs_live_xxxxxxxx
+```
+
+> `activer` ne constate aucun paiement : il ouvre des droits **parce que vous
+> affirmez** avoir vu le règlement dans votre tableau de bord Stripe. La
+> référence demandée est ce qui permettra de le retrouver plus tard.
+
+### Émetteur de licences
+
+Quand l'abonné active sa clé, le serveur signe un jeton Ed25519. Sans
+configuration, une paire de clés est créée au premier besoin dans
+`~/.agence_financiere/licence_emetteur.json` (**mode 600**).
+
+Pour qu'un **seul** émetteur signe pour tout un parc, placez la clé privée sur
+ce serveur et la clé publique sur les postes :
+
+```bash
+# Sur le serveur : générer et afficher la paire
+python - <<'EOF'
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives import serialization as s
+k = Ed25519PrivateKey.generate()
+print("PRIVÉE  :", k.private_bytes(s.Encoding.Raw, s.PrivateFormat.Raw,
+                                   s.NoEncryption()).hex())
+print("PUBLIQUE:", k.public_key().public_bytes(s.Encoding.Raw,
+                                               s.PublicFormat.Raw).hex())
+EOF
+```
+
+- `AGENCE_LICENCE_PRIVKEY` → sur le serveur, dans `.env` (**c'est un secret** :
+  qui la détient peut fabriquer des licences Pro) ;
+- `AGENCE_LICENCE_PUBKEY` → sur les postes ou dans
+  `python/licence/verification.py` (ce n'en est **pas** un).
+
+> Tant que l'application tourne entièrement sur la machine de l'utilisateur
+> (paquet MSIX, backend local), l'émetteur est cette même machine : la
+> signature protège d'une licence bricolée ou recopiée d'un autre poste, pas
+> de quelqu'un qui contrôle la machine. Un parc où cela compte fait tourner
+> l'émetteur sur un serveur.
 
 ---
 

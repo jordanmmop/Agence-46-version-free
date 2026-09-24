@@ -338,6 +338,30 @@ class DepotComptes:
             );
             CREATE INDEX IF NOT EXISTS idx_sessions_compte
                 ON comptes_sessions(compte_id);
+
+            -- Clés d'abonnement remises à l'abonné après paiement confirmé.
+            -- On stocke l'EMPREINTE, jamais la clé : elle ouvre des droits,
+            -- donc une fuite de la base ne doit pas livrer des abonnements.
+            CREATE TABLE IF NOT EXISTS comptes_cles (
+                cle_hash            TEXT PRIMARY KEY,
+                compte_id           TEXT NOT NULL,
+                formule             TEXT DEFAULT '',
+                -- Référence Stripe du paiement : c'est elle qui empêche
+                -- d'émettre deux clés quand le webhook et le retour du
+                -- navigateur annoncent le même règlement.
+                reference           TEXT DEFAULT '',
+                indice              TEXT DEFAULT '',
+                cree_le             REAL NOT NULL,
+                expire_le           REAL,
+                revoquee_le         REAL,
+                derniere_utilisation REAL,
+                utilisations        INTEGER NOT NULL DEFAULT 0,
+                envoi               TEXT DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_cles_compte
+                ON comptes_cles(compte_id);
+            CREATE INDEX IF NOT EXISTS idx_cles_reference
+                ON comptes_cles(reference);
         """)
 
     # ── Lectures ──
@@ -406,6 +430,49 @@ class DepotComptes:
     def supprimer_sessions_du_compte(self, compte_id: str) -> None:
         with self._conn() as c:
             c.execute("DELETE FROM comptes_sessions WHERE compte_id = ?", (compte_id,))
+
+    # ── Clés d'abonnement ──
+    def creer_cle(self, cle: Dict[str, Any]) -> None:
+        colonnes = ", ".join(cle)
+        marques = ", ".join("?" * len(cle))
+        with self._conn() as c:
+            c.execute(f"INSERT INTO comptes_cles ({colonnes}) VALUES ({marques})",
+                      tuple(cle.values()))
+
+    def cle_par_hash(self, cle_hash: str) -> Optional[Dict[str, Any]]:
+        with self._conn() as c:
+            r = c.execute("SELECT * FROM comptes_cles WHERE cle_hash = ?",
+                          (cle_hash,)).fetchone()
+            return dict(r) if r else None
+
+    def cle_par_reference(self, reference: str) -> Optional[Dict[str, Any]]:
+        if not reference:
+            return None
+        with self._conn() as c:
+            r = c.execute("SELECT * FROM comptes_cles WHERE reference = ? "
+                          "ORDER BY cree_le DESC LIMIT 1", (reference,)).fetchone()
+            return dict(r) if r else None
+
+    def cles_du_compte(self, compte_id: str) -> list:
+        with self._conn() as c:
+            return [dict(r) for r in c.execute(
+                "SELECT * FROM comptes_cles WHERE compte_id = ? ORDER BY cree_le DESC",
+                (compte_id,)).fetchall()]
+
+    def modifier_cle(self, cle_hash: str, **champs) -> None:
+        if not champs:
+            return
+        sets = ", ".join(f"{k} = ?" for k in champs)
+        with self._conn() as c:
+            c.execute(f"UPDATE comptes_cles SET {sets} WHERE cle_hash = ?",
+                      (*champs.values(), cle_hash))
+
+    def revoquer_cles(self, compte_id: str, horodatage: float) -> int:
+        with self._conn() as c:
+            cur = c.execute("UPDATE comptes_cles SET revoquee_le = ? "
+                            "WHERE compte_id = ? AND revoquee_le IS NULL",
+                            (horodatage, compte_id))
+            return int(cur.rowcount or 0)
 
 
 # Dépôt effectivement utilisé. Construit au PREMIER appel de `depot()` et non

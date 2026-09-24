@@ -42,6 +42,7 @@ import hmac
 import json
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, Optional, Tuple
 
@@ -264,14 +265,88 @@ def verifier_session(session_id: str) -> Dict[str, Any]:
     return _activer(compte_id, formule, session_id)
 
 
-def _activer(compte_id: str, formule: str, reference: str) -> Dict[str, Any]:
+def _activer(compte_id: str, formule: str, reference: str,
+             differer_envoi: bool = False) -> Dict[str, Any]:
+    """Ouvre les droits, ÉMET la clé d'abonnement et la remet à son titulaire.
+
+    Les trois vont ensemble : un paiement confirmé sans clé remise laisse
+    l'abonné devant un écran qui lui réclame une clé qu'il n'a jamais reçue.
+
+    `differer_envoi` sert au webhook : Stripe considère l'appel en échec
+    au-delà d'une vingtaine de secondes et le rejoue, ce qui produirait des
+    envois en double. Un SMTP lent ne doit pas provoquer cela — l'envoi part
+    alors dans un fil d'exécution séparé, la clé étant déjà enregistrée.
+    """
     try:
         compte = comptes.activer_abonnement(compte_id, formule, reference)
     except comptes.ErreurCompte as e:
         return {"success": False, "error": str(e)}
-    return {"success": True, "formule": formule,
-            "compte": comptes.public(compte),
-            "message": "Paiement confirmé — abonnement Pro activé."}
+
+    resultat = {"success": True, "formule": formule,
+                "compte": comptes.public(compte),
+                "message": "Paiement confirmé — abonnement Pro activé."}
+    resultat.update(remettre_cle(compte, formule, reference, differer_envoi))
+    return resultat
+
+
+def remettre_cle(compte: Dict[str, Any], formule: str, reference: str,
+                 differer_envoi: bool = False) -> Dict[str, Any]:
+    """Émet la clé du compte (une seule par paiement) et la lui envoie.
+
+    Ne lève jamais : le paiement est encaissé et les droits sont ouverts. Une
+    panne de SMTP ou de passerelle SMS ne doit pas faire répondre « échec » à
+    un abonné qui a bien payé — elle se signale, et la clé reste réémettable
+    depuis l'écran d'abonnement.
+    """
+    from licence import cles, notifications
+
+    try:
+        emission = cles.emettre(
+            compte["id"], formule, reference, compte.get("abonne_jusqua"))
+    except Exception as e:
+        logger.error("[stripe] Clé d'abonnement non émise pour %s : %s",
+                     compte.get("id"), e, exc_info=True)
+        return {"cle_emise": False,
+                "cle_message": "L'abonnement est actif, mais la clé n'a pas pu "
+                               "être émise. Demandez-la depuis l'écran "
+                               "d'abonnement de l'application."}
+
+    if emission["deja_emise"]:
+        # Le webhook et le retour du navigateur annoncent le MÊME règlement :
+        # la clé est déjà partie, on ne la réémet pas et on n'en renvoie pas.
+        return {"cle_emise": True, "cle_deja_emise": True,
+                "cle_message": "Votre clé d'abonnement vous a déjà été envoyée."}
+
+    cle = emission["cle"]
+    empreinte = emission["enregistrement"]["cle_hash"]
+
+    def _envoi() -> Dict[str, Any]:
+        envoi = notifications.envoyer_cle(compte, cle, formule)
+        cles.marquer_envoi(empreinte, envoi.get("canaux", ""))
+        return envoi
+
+    if differer_envoi:
+        threading.Thread(target=_envoi, name="envoi-cle", daemon=True).start()
+        return {"cle_emise": True, "cle_envoi_differe": True,
+                "cle_message": "Votre clé d'abonnement vous est envoyée."}
+
+    envoi = _envoi()
+    return {"cle_emise": True, "cle": cle, "cle_envoi": envoi,
+            "cle_message": _message_envoi(envoi, compte)}
+
+
+def _message_envoi(envoi: Dict[str, Any], compte: Dict[str, Any]) -> str:
+    """Phrase montrée à l'abonné — exacte, y compris quand rien n'est parti."""
+    from licence import notifications
+    parties = []
+    if envoi.get("email"):
+        parties.append(f"par e-mail à {notifications.masquer_email(compte.get('email', ''))}")
+    if envoi.get("sms"):
+        parties.append(f"par SMS au {notifications.masquer_telephone(compte.get('telephone', ''))}")
+    if parties:
+        return "Votre clé d'abonnement vous a été envoyée " + " et ".join(parties) + "."
+    return ("Votre clé d'abonnement est affichée à l'écran : aucun envoi "
+            "automatique n'a abouti, notez-la dès maintenant.")
 
 
 # ═══════════════════════════ WEBHOOK ══════════════════════════════════════
@@ -365,8 +440,15 @@ def traiter_webhook(charge: bytes, entete_signature: str) -> Dict[str, Any]:
                          "repli sur « %s »", type_evt, objet.get("id"),
                          lconfig.FORMULE_DEFAUT)
             formule = lconfig.FORMULE_DEFAUT
-        resultat = _activer(compte_id, formule, str(objet.get("id") or ""))
+        # `differer_envoi` : Stripe rejoue un webhook qui met trop longtemps à
+        # répondre. L'envoi de la clé part donc en arrière-plan — jamais dans
+        # le temps de réponse dû à Stripe.
+        resultat = _activer(compte_id, formule, str(objet.get("id") or ""),
+                            differer_envoi=True)
         resultat.setdefault("evenement", type_evt)
+        # La clé ne sort JAMAIS par le webhook : la réponse part chez Stripe,
+        # pas chez l'abonné.
+        resultat.pop("cle", None)
         return resultat
 
     if type_evt in EVENEMENTS_FIN:
@@ -443,4 +525,29 @@ def etat_paiement(compte_id: str = "") -> Dict[str, Any]:
         # Message d'alerte si la clé et les liens ne parlent pas du même monde.
         "incoherence": incoherence_environnement(),
         "essai_jours": lconfig.TRIAL_DUREE_JOURS,
+        # Par quels canaux la clé d'abonnement sera remise. L'interface s'en
+        # sert pour annoncer ce qui va RÉELLEMENT se passer après le paiement,
+        # plutôt que de promettre un e-mail qu'aucun serveur n'enverra.
+        "remise_cle": _remise_cle(),
+        "cles": _cles_du_compte(compte_id),
     }
+
+
+def _remise_cle() -> Dict[str, Any]:
+    from licence import notifications
+    diag = notifications.diagnostic()
+    return {"email": diag["email"], "sms": diag["sms"],
+            "sms_fournisseur": diag["sms_fournisseur"],
+            "aucun_canal": not (diag["email"] or diag["sms"])}
+
+
+def _cles_du_compte(compte_id: str) -> list:
+    """Clés déjà émises pour ce compte — masquées, jamais en clair."""
+    if not compte_id:
+        return []
+    try:
+        from licence import cles
+        return cles.cles_du_compte(compte_id)
+    except Exception as e:
+        logger.warning("[stripe] Clés du compte illisibles : %s", e)
+        return []

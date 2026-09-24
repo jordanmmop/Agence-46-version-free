@@ -7,8 +7,8 @@
     "n'est ouverte : l'application reste 100 % locale.",
     "Lu par python/utils/mise_a_jour.py ; expose par /api/mise-a-jour."
   ],
-  "version": "4.1.0",
-  "url": "https://exemple.tld/telechargements/AgenceNumerique-Setup-4.1.0.exe",
+  "version": "4.2.0",
+  "url": "https://exemple.tld/telechargements/AgenceNumerique-Setup-4.2.0.exe",
   "notes": "Correction du calcul de drawdown et nouveaux symboles AvaTrade.",
   "obligatoire": false,
   "sha256": "0000000000000000000000000000000000000000000000000000000000000000"

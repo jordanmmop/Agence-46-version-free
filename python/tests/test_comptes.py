@@ -798,17 +798,23 @@ def test_incoherence_cle_et_liens_detectee():
     print("  OK — clé et liens désaccordés : détecté et expliqué")
 
 
-def test_version_4_1_0_coherente():
-    """La version et sa note doivent exister et concorder."""
+def test_version_et_note_coherentes():
+    """La version courante doit avoir sa note, et elle doit dire vrai.
+
+    Le numéro n'est PLUS écrit en dur ici : un test qu'il faut éditer à chaque
+    publication finit par être édité sans être relu. C'est le fichier VERSION
+    qui fait foi, et le test vérifie que tout le reste le suit.
+    """
     version = (_RACINE / "VERSION").read_text(encoding="utf-8").strip()
-    assert version == "4.1.0", f"VERSION vaut {version!r}"
+    assert version.count(".") == 2 and version.replace(".", "").isdigit(), \
+        f"VERSION vaut {version!r}"
 
     note = _RACINE / f"RELEASE_NOTES_{version}.md"
     assert note.is_file(), f"note de version manquante : {note.name}"
     texte = note.read_text(encoding="utf-8")
     assert version in texte.splitlines()[0], "le titre ne porte pas la version"
 
-    # La note doit annoncer ce que cette version change réellement.
+    # Les engagements qui doivent rester vrais de version en version.
     for element in ("3 jours", "78,79", "849,99", "PBKDF2", "carte bancaire",
                     "Stripe", "IPv4"):
         assert element in texte, f"la note ne mentionne pas « {element} »"
@@ -817,6 +823,11 @@ def test_version_4_1_0_coherente():
     from licence import config as lconfig
     assert f"{lconfig.FORMULES['mensuel']['prix']:.2f}".replace(".", ",") in texte
     assert f"{lconfig.FORMULES['annuel']['prix']:.2f}".replace(".", ",") in texte
+
+    # Les notes des versions précédentes restent en place : on ne réécrit pas
+    # l'historique d'un produit déjà distribué.
+    anterieures = sorted(_RACINE.glob("RELEASE_NOTES_*.md"))
+    assert len(anterieures) >= 2, "les notes antérieures ont disparu"
     print(f"  OK — version {version}, note présente et cohérente avec les tarifs")
 
 
@@ -1005,7 +1016,7 @@ def run():
         test_liens_de_paiement_exacts()
         test_liens_de_paiement_surchargeables_et_valides()
         test_incoherence_cle_et_liens_detectee()
-        test_version_4_1_0_coherente()
+        test_version_et_note_coherentes()
         test_cookie_secure_selon_le_transport()
         test_origines_cors_restreignables()
         test_guide_de_deploiement_complet()

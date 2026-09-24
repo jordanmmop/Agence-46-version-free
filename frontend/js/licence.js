@@ -216,18 +216,28 @@
     const dispo = etat && etat.abonnement_disponible;
     // Aucun émetteur configuré : le dire franchement plutôt que d'ouvrir un
     // formulaire qui ne mènerait nulle part. AUCUN paiement n'est simulé.
+    // D'où vient la clé : c'est la première question de quelqu'un qui vient
+    // de payer et voit un champ vide. Sans cette ligne, l'écran demande
+    // quelque chose dont l'utilisateur ignore qu'il l'a déjà reçu.
     const champ = `
       <label class="lic-label" for="lic-cle">Clé d'abonnement ou licence</label>
       <div class="lic-row">
-        <input id="lic-cle" class="lic-input" placeholder="Collez votre clé d'abonnement"
+        <input id="lic-cle" class="lic-input" placeholder="AGF-XXXXX-XXXXX-XXXXX"
                autocomplete="off" spellcheck="false">
         <button class="lic-btn lic-btn-pro" onclick="licenceActiver()">Activer</button>
       </div>
+      <p class="lic-detail">Votre clé vous a été envoyée par e-mail et par SMS
+      après la confirmation de votre paiement. Vous ne l'avez pas reçue ?
+      <a href="#" onclick="return licenceDemanderCle(event)">Demandez-en une nouvelle</a>.</p>
       <div id="lic-activation" class="lic-result"></div>`;
+    // Serveur sans secret Stripe : aucun paiement ne peut y être CONFIRMÉ.
+    // On le dit, sans laisser croire que la clé déjà reçue serait inutile —
+    // elle s'active quand même.
     const indispo = `
-      <p class="lic-detail">L'abonnement Pro n'est pas encore souscriptible depuis
-      cette version de l'application : aucun émetteur de licences n'y est raccordé.
-      Si vous disposez déjà d'une clé d'abonnement, collez-la ci-dessous.</p>` + champ;
+      <p class="lic-detail">Ce serveur ne peut pas confirmer de paiement pour
+      l'instant : la souscription depuis l'application n'est donc pas encore
+      possible. Si vous disposez déjà d'une clé d'abonnement, elle reste
+      activable ci-dessous.</p>` + champ;
 
     ouvrirModale('lic-pro', '★ Passer à la version Pro', `
       <p class="lic-intro">L'abonnement Pro débloque l'ensemble des agents IA,
@@ -238,6 +248,29 @@
     setTimeout(() => { const i = document.getElementById('lic-cle'); if (i) i.focus(); }, 40);
   }
   window.licencePasserPro = passerPro;
+
+  // Raccourci depuis l'écran « Passer à Pro » : réémet la clé et la pose
+  // directement dans le champ, prête à être activée.
+  window.licenceDemanderCle = function (evenement) {
+    if (evenement) evenement.preventDefault();
+    const sortie = document.getElementById('lic-activation');
+    if (sortie) sortie.textContent = 'Émission d\'une nouvelle clé…';
+    fetch('/api/abonnement/cle', { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        if (!sortie) return;
+        if (!d.success) {
+          sortie.innerHTML = '❌ ' + E(d.error || 'Clé indisponible.');
+          return;
+        }
+        const champ = document.getElementById('lic-cle');
+        if (champ) champ.value = d.cle;
+        sortie.innerHTML = '✅ ' + E(d.message || '')
+          + ' Votre clé est saisie ci-dessus : cliquez sur « Activer ».';
+      })
+      .catch(() => { if (sortie) sortie.innerHTML = '❌ Serveur injoignable.'; });
+    return false;
+  };
 
   window.licenceActiver = async function () {
     const champ = document.getElementById('lic-cle');

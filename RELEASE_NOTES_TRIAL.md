@@ -94,6 +94,26 @@ premier prélèvement. Ils se remplacent sans recompiler, par les variables
 Une fois le règlement **confirmé par Stripe**, le compte passe en `abonné` et
 l'intégralité des agents IA et des fonctionnalités avancées est débloquée.
 
+### La clé d'abonnement
+
+Dans la foulée de cette confirmation, l'application **émet une clé
+d'abonnement** et l'**envoie par e-mail et par SMS** sur les coordonnées du
+compte :
+
+```
+AGF-7K3QM-9XZ2P-R4TB8
+```
+
+L'abonné la colle dans **Passer à la version Pro** : son installation
+enregistre alors une licence signée et fonctionne hors ligne jusqu'au terme.
+Une seule clé est émise par règlement, et la base n'en conserve que
+l'**empreinte** — une clé perdue se remplace (bouton « Je n'ai pas reçu ma
+clé »), elle ne se réaffiche pas.
+
+Sans SMTP ni passerelle SMS configurés, la clé s'affiche sur la page de retour
+du paiement et reste réémettable depuis l'application : l'interface l'annonce
+au lieu de promettre un e-mail qui n'arrivera pas.
+
 ### Comment un paiement est confirmé
 
 Rien de ce qui vient du navigateur ne vaut preuve de paiement — ni « j'ai
@@ -202,14 +222,14 @@ Un seul de ces quatre états débloque quoi que ce soit.
 
 ## Souscription
 
-L'architecture d'abonnement est en place (`python/licence/abonnement.py`) mais
-**aucun prestataire de paiement n'est raccordé à ce jour** : aucun paiement
-n'est simulé, et l'activation indique clairement ce qui manque. Deux chemins
-sont prévus :
+Le paiement passe par **Stripe** (voir plus haut) : un règlement confirmé ouvre
+les droits du compte et fait parvenir une **clé d'abonnement** à son titulaire.
+Cette clé s'active depuis **Réglages ⚙️ → Offre & abonnement → Passer à Pro**,
+et le serveur signe alors la licence qui rend l'installation autonome.
 
-- **`serveur`** — un émetteur de licences HTTPS (variable `LICENCE_API_URL`) ;
+Deux autres chemins restent prévus mais **ne sont pas raccordés** — aucun
+paiement n'est simulé, et l'activation indique ce qui manque :
+
+- **`serveur`** — un émetteur de licences HTTPS externe (`LICENCE_API_URL`) ;
 - **`microsoft_store`** — abonnement vendu comme extension de la fiche Store,
   qui demande le SDK Windows Store.
-
-Si vous disposez déjà d'une clé d'abonnement ou d'une licence signée, elle
-s'active depuis **Réglages ⚙️ → Offre & abonnement → Passer à Pro**.

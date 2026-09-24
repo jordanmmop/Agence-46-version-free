@@ -273,17 +273,46 @@ def test_sans_cle_publique_aucune_licence_ne_passe():
 
 def test_aucune_cle_privee_dans_le_code_distribue():
     """Le dépôt n'embarque QUE des clés publiques — et pas même celle-ci tant
-    qu'aucun émetteur n'existe."""
+    qu'aucun émetteur n'existe.
+
+    Un seul fichier a le droit de FABRIQUER une clé privée : `emetteur.py`,
+    qui est précisément l'émetteur de licences. Le test le nomme au lieu de
+    relâcher la règle, pour qu'un seizième module ne puisse pas s'ajouter
+    discrètement à la liste des fabricants de clés.
+    """
+    import re
     from licence import verification
     assert verification.CLE_PUBLIQUE_EMETTEUR == "" or \
         len(bytes.fromhex(verification.CLE_PUBLIQUE_EMETTEUR)) == 32
-    source = (_RACINE / "python" / "licence").rglob("*.py")
-    for fichier in source:
+
+    fabricants = set()
+    for fichier in (_RACINE / "python" / "licence").rglob("*.py"):
         texte = fichier.read_text(encoding="utf-8")
         assert "PRIVATE KEY" not in texte, f"{fichier.name} contient une clé privée"
-        assert "Ed25519PrivateKey.generate" not in texte, (
-            f"{fichier.name} fabrique une clé privée : elle n'a rien à faire "
-            "dans le code distribué (seul l'émetteur en produit)")
+        # Aucun fichier, émetteur compris, ne contient de clé EN DUR : 64
+        # caractères hexadécimaux d'affilée, c'est exactement la forme d'une
+        # clé Ed25519 recopiée dans le code.
+        for suspect in re.findall(r"[0-9a-fA-F]{64}", texte):
+            ligne = next(l for l in texte.splitlines() if suspect in l)
+            assert ligne.lstrip().startswith("#"), (
+                f"{fichier.name} contient 64 caractères hexadécimaux hors "
+                f"commentaire : {suspect[:12]}…")
+        if "Ed25519PrivateKey.generate" in texte:
+            fabricants.add(fichier.name)
+
+    assert fabricants <= {"emetteur.py"}, (
+        f"{sorted(fabricants)} fabrique(nt) une clé privée : seul l'émetteur "
+        "de licences a cette responsabilité")
+
+    # L'émetteur écrit sa clé privée en 0600 dès la CRÉATION du fichier, et
+    # pas en corrigeant les permissions après coup : entre les deux, la clé
+    # serait lisible par les autres comptes de la machine.
+    emetteur = (_RACINE / "python" / "licence" / "emetteur.py").read_text(encoding="utf-8")
+    if "Ed25519PrivateKey.generate" in emetteur:
+        assert "0o600" in emetteur, "l'émetteur doit écrire sa clé privée en 0600"
+        assert "os.O_CREAT" in emetteur, (
+            "l'émetteur doit créer le fichier avec ses permissions, pas les "
+            "corriger ensuite")
     print("  OK — aucune clé privée dans le paquet licence")
 
 

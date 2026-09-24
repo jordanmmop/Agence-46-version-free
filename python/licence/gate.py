@@ -341,7 +341,13 @@ def etat_public(tous_les_agents: Sequence = ()) -> Dict[str, Any]:
             (courant or {}).get("id", "")),
         "expire_le": infos.get("expire_le"),
         "fournisseur": infos.get("fournisseur", ""),
-        "abonnement_disponible": bool(abonnement.url_emetteur()),
+        # Vrai dès qu'un abonnement peut RÉELLEMENT être souscrit ou activé
+        # depuis l'application. Ce drapeau ne regardait que l'émetteur externe
+        # (`LICENCE_API_URL`), jamais déployé : l'écran affichait donc
+        # « l'abonnement n'est pas encore souscriptible » à des clients qui
+        # venaient de payer par Stripe et tenaient leur clé en main.
+        "abonnement_disponible": bool(abonnement.url_emetteur())
+                                 or stripe_paiement.encaissement_configure(),
         "agents": {
             "total": total,
             "autorises": len(autorises),

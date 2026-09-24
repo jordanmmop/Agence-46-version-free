@@ -308,10 +308,69 @@ def activer(cle_abonnement: str) -> Dict[str, Any]:
     if cle_abonnement.startswith(f"{PREFIXE}."):
         return enregistrer_jeton(cle_abonnement)
 
+    # Clé d'abonnement « AGF-… » : celle que l'abonné reçoit par e-mail et par
+    # SMS quand Stripe confirme son règlement. Elle se vérifie contre la BASE
+    # DES COMPTES — pas contre une liste locale — et n'ouvre des droits que si
+    # l'abonnement qui la porte est réellement en cours.
+    from licence import cles
+    if cles.normaliser(cle_abonnement):
+        return _activer_cle_abonnement(cle_abonnement)
+
     fournisseur = fournisseur_configure()
     if fournisseur == "microsoft_store":
         return _activer_microsoft_store()
     return _activer_serveur(cle_abonnement)
+
+
+def _activer_cle_abonnement(cle_abonnement: str) -> Dict[str, Any]:
+    """Active Pro à partir d'une clé d'abonnement remise après paiement.
+
+    Deux étapes, dans cet ordre, et la seconde ne se fait jamais sans la
+    première : constater l'abonnement en base, PUIS signer un jeton. Le jeton
+    est ce qui rend l'activation durable et hors ligne — sans lui, l'accès
+    Pro s'arrêterait à la prochaine déconnexion.
+    """
+    from licence import cles, emetteur
+
+    verdict = cles.valider(cle_abonnement)
+    if not verdict.get("valide"):
+        return {"success": False, "etat": EtatLicence.PAYMENT_REQUIRED.value,
+                "error": verdict.get("erreur", "Clé d'abonnement refusée.")}
+
+    echeance = verdict.get("expire_le")
+    if not echeance:
+        return {"success": False, "etat": EtatLicence.PAYMENT_REQUIRED.value,
+                "error": "L'abonnement rattaché à cette clé n'a pas d'échéance "
+                         "connue. Contactez le support."}
+
+    jeton = emetteur.emettre(verdict.get("email") or verdict["compte_id"], echeance)
+    if not jeton:
+        # La clé est BONNE, seule la signature a échoué. Le dire tel quel :
+        # l'abonné n'a rien à corriger de son côté, et ses droits restent
+        # ouverts tant qu'il est connecté à son compte.
+        logger.error("[licence] Clé valide mais jeton non signé : émetteur "
+                     "indisponible sur cette installation.")
+        return {"success": False, "etat": EtatLicence.PAYMENT_REQUIRED.value,
+                "error": "Votre abonnement est bien actif, mais cette "
+                         "installation ne peut pas enregistrer de licence "
+                         "hors ligne. Connectez-vous à votre compte pour "
+                         "utiliser la version Pro.",
+                "abonnement_actif": True}
+
+    resultat = enregistrer_jeton(jeton)
+    if not resultat.get("success"):
+        # Arrive quand `AGENCE_LICENCE_PUBKEY` désigne un émetteur CENTRAL :
+        # le jeton signé localement est alors rejeté, et c'est voulu.
+        resultat["error"] = (
+            "Votre abonnement est bien actif, mais cette installation "
+            "n'accepte que les licences d'un émetteur central "
+            "(AGENCE_LICENCE_PUBKEY). Connectez-vous à votre compte pour "
+            "utiliser la version Pro.")
+        resultat["abonnement_actif"] = True
+        return resultat
+    resultat["formule"] = verdict.get("formule", "")
+    resultat["message"] = "Abonnement Pro activé sur cette installation."
+    return resultat
 
 
 def _activer_serveur(cle_abonnement: str) -> Dict[str, Any]:

@@ -1959,6 +1959,52 @@ body {
 }
 .cpt-erreur a { color: var(--accent); }
 
+/* Les liens d'aide des écrans de licence : sans cette règle, ils héritent du
+   bleu par défaut du navigateur, illisible sur le fond sombre de l'application
+   — « Demandez-en une nouvelle » devenait invisible. */
+.lic-detail a,
+.lic-intro a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.lic-detail a:hover,
+.lic-intro a:hover { color: var(--text); }
+
+/* ── Clé d'abonnement remise après paiement ── */
+/* Elle n'est lisible qu'une fois : elle doit donc sauter aux yeux et se
+   sélectionner d'un geste, sans que l'utilisateur ait à viser au caractère. */
+.cpt-cle-boite {
+  background: var(--surface2);
+  border: 1px solid rgba(46, 189, 133, 0.35);
+  border-left: 2px solid var(--green, #2ebd85);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 0.8rem;
+  margin-top: 0.6rem;
+}
+.cpt-cle-lib {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.45rem;
+}
+.cpt-cle-val {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--green, #2ebd85);
+  word-break: break-all;
+  user-select: all;              /* un clic sélectionne la clé entière */
+}
+.cpt-cle-aide {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-top: 0.5rem;
+}
+
 /* ── Cartes de formules ── */
 .cpt-formules {
   display: grid;

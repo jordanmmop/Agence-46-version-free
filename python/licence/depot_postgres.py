@@ -224,6 +224,25 @@ class DepotPostgres:
                 )""")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_compte "
                         "ON comptes_sessions(compte_id)")
+            # Clés d'abonnement : EMPREINTE seulement, jamais la clé en clair.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS comptes_cles (
+                    cle_hash             TEXT PRIMARY KEY,
+                    compte_id            TEXT NOT NULL,
+                    formule              TEXT DEFAULT '',
+                    reference            TEXT DEFAULT '',
+                    indice               TEXT DEFAULT '',
+                    cree_le              DOUBLE PRECISION NOT NULL,
+                    expire_le            DOUBLE PRECISION,
+                    revoquee_le          DOUBLE PRECISION,
+                    derniere_utilisation DOUBLE PRECISION,
+                    utilisations         INTEGER NOT NULL DEFAULT 0,
+                    envoi                TEXT DEFAULT ''
+                )""")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_cles_compte "
+                        "ON comptes_cles(compte_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_cles_reference "
+                        "ON comptes_cles(reference)")
         conn.commit()
         self._tables_creees = True
 
@@ -238,6 +257,12 @@ class DepotPostgres:
                 if fetch == "valeur":
                     ligne = cur.fetchone()
                     return list(ligne.values())[0] if ligne else None
+                if fetch == "tous":
+                    return [dict(l) for l in cur.fetchall()]
+                if fetch == "nombre":
+                    # rowcount est lu AVANT la sortie du bloc : après le
+                    # commit, le curseur est fermé et la valeur perdue.
+                    return int(cur.rowcount or 0)
                 return None
 
     # ── Lectures ──
@@ -306,6 +331,42 @@ class DepotPostgres:
     def supprimer_sessions_du_compte(self, compte_id: str) -> None:
         self._executer("DELETE FROM comptes_sessions WHERE compte_id = %s",
                        (compte_id,))
+
+    # ── Clés d'abonnement ──
+    def creer_cle(self, cle: Dict[str, Any]) -> None:
+        colonnes = ", ".join(cle)
+        marques = ", ".join(["%s"] * len(cle))
+        self._executer(f"INSERT INTO comptes_cles ({colonnes}) VALUES ({marques})",
+                       tuple(cle.values()))
+
+    def cle_par_hash(self, cle_hash: str) -> Optional[Dict[str, Any]]:
+        return self._executer("SELECT * FROM comptes_cles WHERE cle_hash = %s",
+                              (cle_hash,), fetch="un")
+
+    def cle_par_reference(self, reference: str) -> Optional[Dict[str, Any]]:
+        if not reference:
+            return None
+        return self._executer("SELECT * FROM comptes_cles WHERE reference = %s "
+                              "ORDER BY cree_le DESC LIMIT 1",
+                              (reference,), fetch="un")
+
+    def cles_du_compte(self, compte_id: str) -> list:
+        return self._executer("SELECT * FROM comptes_cles WHERE compte_id = %s "
+                              "ORDER BY cree_le DESC",
+                              (compte_id,), fetch="tous") or []
+
+    def modifier_cle(self, cle_hash: str, **champs) -> None:
+        if not champs:
+            return
+        sets = ", ".join(f"{k} = %s" for k in champs)
+        self._executer(f"UPDATE comptes_cles SET {sets} WHERE cle_hash = %s",
+                       (*champs.values(), cle_hash))
+
+    def revoquer_cles(self, compte_id: str, horodatage: float) -> int:
+        return int(self._executer(
+            "UPDATE comptes_cles SET revoquee_le = %s "
+            "WHERE compte_id = %s AND revoquee_le IS NULL",
+            (horodatage, compte_id), fetch="nombre") or 0)
 
     # ── Exploitation ──
     def fermer(self) -> None:

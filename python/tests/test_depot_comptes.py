@@ -105,6 +105,42 @@ def _verifier_contrat(depot, nom: str) -> None:
     assert depot.session(a) is None and depot.session(b) is None, \
         f"{nom} : supprimer_sessions_du_compte"
 
+    # ── Clés d'abonnement ──
+    # Même contrat des deux côtés : c'est ce qui permet de basculer les
+    # comptes vers PostgreSQL sans que les clés déjà remises cessent d'agir.
+    from licence import cles as mod_cles
+    cle = mod_cles.generer()
+    enregistrement = {
+        "cle_hash": mod_cles.empreinte(cle),
+        "compte_id": c["id"], "formule": "annuel", "reference": "cs_contrat",
+        "indice": mod_cles.indice(cle), "cree_le": time.time(),
+        "expire_le": jusqua, "revoquee_le": None,
+        "derniere_utilisation": None, "utilisations": 0, "envoi": "",
+    }
+    depot.creer_cle(enregistrement)
+    relu = depot.cle_par_hash(enregistrement["cle_hash"])
+    assert relu and relu["compte_id"] == c["id"], f"{nom} : cle_par_hash"
+    assert depot.cle_par_hash("empreinte-inconnue") is None, f"{nom} : hash inconnu"
+    assert depot.cle_par_reference("cs_contrat")["cle_hash"] == \
+        enregistrement["cle_hash"], f"{nom} : cle_par_reference"
+    assert depot.cle_par_reference("") is None, f"{nom} : référence vide"
+    assert depot.cle_par_reference("cs_jamais_vu") is None, f"{nom} : référence inconnue"
+    assert len(depot.cles_du_compte(c["id"])) == 1, f"{nom} : cles_du_compte"
+    assert depot.cles_du_compte("compte-inconnu") == [], f"{nom} : compte sans clé"
+
+    depot.modifier_cle(enregistrement["cle_hash"], utilisations=3, envoi="email+sms")
+    relu = depot.cle_par_hash(enregistrement["cle_hash"])
+    assert int(relu["utilisations"]) == 3 and relu["envoi"] == "email+sms", \
+        f"{nom} : modifier_cle"
+    depot.modifier_cle(enregistrement["cle_hash"])     # sans champ : ne doit pas lever
+
+    # La révocation ne compte QUE les clés encore actives : rejouée, elle ne
+    # doit pas annoncer qu'elle a révoqué une seconde fois la même clé.
+    assert depot.revoquer_cles(c["id"], time.time()) == 1, f"{nom} : revoquer_cles"
+    assert depot.cle_par_hash(enregistrement["cle_hash"])["revoquee_le"], \
+        f"{nom} : révocation non enregistrée"
+    assert depot.revoquer_cles(c["id"], time.time()) == 0, f"{nom} : double révocation"
+
     # ── Comptage ──
     avant = depot.nombre()
     depot.creer(_compte(3))
