@@ -190,7 +190,15 @@ Configuration : [`DEPLOIEMENT.md`](DEPLOIEMENT.md), section 4 bis.
 
 Côté administrateur, `scripts/abonnement.py` permet de consulter l'état d'un
 compte, de réémettre une clé, ou d'ouvrir des droits pour un règlement
-constaté dans le tableau de bord Stripe.
+constaté dans le tableau de bord Stripe. Quand un client n'a rien reçu,
+`scripts/abonnement.py diagnostic` contrôle la chaîne entière et nomme le
+maillon fautif.
+
+> ⚠️ L'abonnement exige un serveur où un **processus Python permanent** peut
+> tourner et que **Stripe peut joindre en HTTPS**. Un hébergement web
+> **mutualisé** (accès FTP seulement, comme `clusterXXX.hosting.ovh.net`) ne
+> convient pas : c'est un espace de fichiers PHP. Voir le tableau en tête de
+> [`DEPLOIEMENT.md`](DEPLOIEMENT.md).
 
 **Mise en ligne sur votre serveur** (Stripe, webhook, HTTPS, systemd, nginx,
 sauvegardes) : [`DEPLOIEMENT.md`](DEPLOIEMENT.md).

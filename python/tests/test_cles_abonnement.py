@@ -741,6 +741,59 @@ def test_aucun_secret_en_dur_dans_les_nouveaux_modules():
     print("  OK — aucun identifiant d'envoi ni clé privée en dur")
 
 
+def test_diagnostic_nomme_le_premier_maillon_casse():
+    """« Pourquoi mon client n'a pas reçu sa clé ? » doit avoir une réponse.
+
+    Le diagnostic doit désigner LE maillon qui casse la chaîne, pas aligner
+    des avertissements qui découlent tous de la même cause.
+    """
+    import subprocess
+    import sys
+    dossier = _isoler()
+    _neutraliser_envois()
+    from licence import comptes
+
+    script = _RACINE / "scripts" / "abonnement.py"
+    environnement = dict(os.environ, AGENCE_DATA_DIR=str(dossier / "data"))
+    for nom in ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "SMTP_HOTE"):
+        environnement.pop(nom, None)
+
+    def _lancer(env):
+        return subprocess.run([sys.executable, str(script), "diagnostic"],
+                              capture_output=True, text=True, timeout=180, env=env)
+
+    # 1. Sans secret Stripe : c'est LA cause, et elle est nommée seule.
+    sortie = _lancer(environnement)
+    assert sortie.returncode == 1, sortie.stdout
+    assert "Aucun secret Stripe" in sortie.stdout
+    assert sortie.stdout.count("Ce qui bloque") == 1
+
+    # 2. Avec les secrets mais aucun paiement reçu : le diagnostic pointe le
+    #    webhook, pas l'envoi — un paiement qui n'arrive pas n'émet rien.
+    comptes.inscrire(_INSCRIPTION)
+    avec = dict(environnement, STRIPE_SECRET_KEY="sk_test_x",
+                STRIPE_WEBHOOK_SECRET="whsec_x")
+    sortie = _lancer(avec)
+    assert "AUCUN paiement n'est jamais arrivé" in sortie.stdout, sortie.stdout
+    assert "api/abonnement/webhook" in sortie.stdout
+    assert "IPv6" in sortie.stdout
+
+    # 3. Paiement reçu, clé émise, mais aucun canal : c'est l'envoi qu'il faut
+    #    configurer, et le diagnostic le dit sans accuser Stripe.
+    compte = comptes.depot().par_email(_INSCRIPTION["email"])
+    compte = comptes.activer_abonnement(compte["id"], "annuel", "cs_diag")
+    from licence import cles
+    cles.emettre(compte["id"], "annuel", "cs_diag", compte["abonne_jusqua"])
+    sortie = _lancer(avec)
+    assert "aucun canal d'envoi n'est configuré" in sortie.stdout, sortie.stdout
+    assert "configurer-serveur.sh --envoi" in sortie.stdout
+    assert "AUCUN paiement n'est jamais arrivé" not in sortie.stdout
+
+    # Aucun secret ne doit fuiter dans un diagnostic qu'on colle dans un ticket.
+    assert "sk_test_x" not in sortie.stdout and "whsec_x" not in sortie.stdout
+    print("  OK — le diagnostic nomme le maillon qui casse la chaîne")
+
+
 def test_outil_admin_ne_simule_aucun_paiement():
     """`activer` exige une référence de règlement et le dit clairement."""
     import subprocess
@@ -789,6 +842,7 @@ def run():
         test_documentation_couvre_la_remise_des_cles()
         test_interface_propose_la_cle()
         test_aucun_secret_en_dur_dans_les_nouveaux_modules()
+        test_diagnostic_nomme_le_premier_maillon_casse()
         test_outil_admin_ne_simule_aucun_paiement()
     finally:
         import importlib

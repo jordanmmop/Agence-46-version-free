@@ -5,6 +5,35 @@ les abonnements Stripe.
 
 ---
 
+## Avant tout : quel type de serveur faut-il ?
+
+Cette application est un **service Python qui tourne en permanence** (uvicorn)
+et qui doit être **joignable publiquement en HTTPS** pour recevoir les webhooks
+de Stripe. Il lui faut donc une machine où vous avez un **accès shell** et le
+droit de faire tourner un processus permanent :
+
+| Type d'hébergement | Convient ? | Pourquoi |
+|---|---|---|
+| VPS, serveur dédié, machine cloud | **Oui** | shell, service permanent, port à soi |
+| Plateforme applicative (Render, Railway, Scaleway…) | **Oui** | conçue pour ça |
+| **Hébergement web mutualisé** (OVH `clusterXXX.hosting.ovh.net`, o2switch, Ionos…) | **Non** | espace de fichiers pour du PHP : pas de processus permanent, pas de port à soi |
+| Votre PC de bureau seul | **Non** | Stripe ne peut pas joindre une machine sans adresse publique |
+
+> Un hébergement **mutualisé** se reconnaît à son accès **FTP/SFTP** et à
+> l'absence de console SSH root. On y dépose des fichiers PHP ; on n'y lance
+> pas de service. Y téléverser cette application ne la ferait pas démarrer.
+>
+> Ce n'est pas inutile pour autant : si votre offre inclut des **adresses
+> e-mail** (MX Plan chez OVH), elles servent très bien à l'envoi des clés
+> d'abonnement — voir la section 4 bis.
+
+**Si vous n'avez pas de machine avec shell**, l'abonnement ne peut pas
+fonctionner : confirmer un paiement exige la clé secrète Stripe, qui ne doit
+**jamais** être installée sur les postes de vos clients. Un VPS d'entrée de
+gamme suffit largement.
+
+---
+
 ## 0. D'abord : quel montage voulez-vous ?
 
 Ce choix commande tout le reste. Lisez-le avant de taper la première commande.
@@ -391,6 +420,18 @@ Vérifiez ensuite ce que le serveur voit réellement :
 ```bash
 sudo -u agence python scripts/abonnement.py canaux
 ```
+
+### Quand un client n'a rien reçu : commencer par le diagnostic
+
+```bash
+sudo -u agence python scripts/abonnement.py diagnostic
+```
+
+Il contrôle la chaîne dans l'ordre où elle casse — base, secrets Stripe,
+canaux d'envoi, puis ce que la base raconte (paiements arrivés, clés émises,
+clés remises) — et nomme **le** maillon fautif plutôt que d'aligner des
+avertissements qui ont tous la même cause. Il n'affiche aucun secret : sa
+sortie peut être collée telle quelle dans un échange de support.
 
 ### Rattraper un abonné qui n'a rien reçu
 
