@@ -304,11 +304,48 @@ def _libelle_formule(formule: str) -> str:
     return f"{fiche['libelle']} — {fiche['prix']:.2f} € par {fiche['periode']}".replace(".", ",")
 
 
-def corps_email(cle: str, formule: str, echeance: Optional[float] = None) -> str:
+def corps_email(cle: str, formule: str, echeance: Optional[float] = None,
+                licence: str = "") -> str:
+    """Message de remise. `licence` a la priorité quand elle existe.
+
+    Une licence signée se vérifie HORS LIGNE, sur n'importe quel poste, sans
+    aucun accès à la base des comptes. C'est donc elle qu'on remet dès qu'on
+    peut en produire une : la clé courte, elle, ne vaut que là où
+    l'application et la base sont ensemble.
+    """
     fin = ""
     if echeance:
         fin = ("\nVos droits Pro sont ouverts jusqu'au "
                + time.strftime("%d/%m/%Y", time.localtime(echeance)) + ".\n")
+
+    if licence:
+        return f"""Votre paiement est confirmé — merci.
+
+Formule souscrite : {_libelle_formule(formule)}
+{fin}
+VOTRE LICENCE D'ABONNEMENT — copiez la ligne entière :
+
+{licence}
+
+Comment l'utiliser :
+  1. Ouvrez l'Agence Numérique Financière.
+  2. Cliquez sur « Passer à la version Pro ».
+  3. Collez la licence ci-dessus, puis validez.
+
+Elle tient sur UNE SEULE LIGNE, sans espace. Si votre messagerie l'a coupée en
+plusieurs morceaux, recollez-les bout à bout avant de valider.
+
+Une fois validée, votre application fonctionne sans connexion jusqu'à
+l'échéance. La version Pro débloque l'ensemble des agents, l'exécution
+simultanée, les workflows avancés, les automatisations et les tâches longues,
+sans limite de requêtes.
+
+Conservez ce message : cette licence est votre preuve d'abonnement.
+Ne la transmettez à personne.
+
+— {EXPEDITEUR_PAR_DEFAUT}
+"""
+
     return f"""Votre paiement est confirmé — merci.
 
 Formule souscrite : {_libelle_formule(formule)}
@@ -336,22 +373,39 @@ Ne la transmettez à personne : elle ouvre l'accès à votre abonnement.
 """
 
 
-def corps_sms(cle: str) -> str:
-    return (f"{_sans_accent(EXPEDITEUR_PAR_DEFAUT)} : votre cle d'abonnement Pro "
+def corps_sms(cle: str, licence: str = "") -> str:
+    """Texte du SMS.
+
+    Une licence signée fait environ 200 caractères : deux SMS facturés, et
+    autant d'occasions de se tromper en la recopiant à la main. On ne l'envoie
+    donc PAS par SMS — on renvoie vers l'e-mail, qui la porte en entier. Mieux
+    vaut un SMS qui oriente qu'un SMS qui contient un identifiant tronqué.
+    """
+    nom = _sans_accent(EXPEDITEUR_PAR_DEFAUT)
+    if licence:
+        return (f"{nom} : votre paiement est confirme. Votre licence "
+                f"d'abonnement Pro vient de vous etre envoyee par e-mail, "
+                f"a coller dans \"Passer a la version Pro\".")
+    return (f"{nom} : votre cle d'abonnement Pro "
             f"est {cle}. A coller dans l'application, rubrique "
             f"\"Passer a la version Pro\". Ne la partagez pas.")
 
 
-def envoyer_cle(compte: Dict[str, Any], cle: str,
-                formule: str = "") -> Dict[str, Any]:
-    """Remet la clé au titulaire du compte, par e-mail ET par SMS.
+def envoyer_cle(compte: Dict[str, Any], cle: str, formule: str = "",
+                licence: str = "") -> Dict[str, Any]:
+    """Remet au titulaire du compte ce qui débloquera son application.
+
+    `licence` — un jeton signé — l'emporte sur `cle` quand elle existe : elle
+    se vérifie hors ligne sur n'importe quel poste, alors que la clé courte
+    exige que l'application partage la base des comptes.
 
     Les destinataires viennent du COMPTE en base — jamais d'un paramètre
-    d'appel. Renvoie le détail par canal, sans jamais recopier la clé.
+    d'appel. Renvoie le détail par canal, sans jamais recopier l'identifiant.
     """
     resultat: Dict[str, Any] = {"email": False, "sms": False, "canaux": "",
-                                "details": [], "cle_remise": False}
-    if not cle or not compte:
+                                "details": [], "cle_remise": False,
+                                "licence": bool(licence)}
+    if not (cle or licence) or not compte:
         resultat["details"].append("Aucune clé à remettre.")
         return resultat
 
@@ -374,14 +428,16 @@ def envoyer_cle(compte: Dict[str, Any], cle: str,
         resultat["details"].append(detail)
         return bool(ok)
 
+    sujet = ("Votre licence d'abonnement Pro — Agence Numérique Financière"
+             if licence else
+             "Votre clé d'abonnement Pro — Agence Numérique Financière")
     ok_mail = _tenter("e-mail", lambda: envoyer_email(
-        str(compte.get("email") or ""),
-        "Votre clé d'abonnement Pro — Agence Numérique Financière",
-        corps_email(cle, formule, echeance)))
+        str(compte.get("email") or ""), sujet,
+        corps_email(cle, formule, echeance, licence)))
     resultat["email"] = ok_mail
 
     ok_sms = _tenter("SMS", lambda: envoyer_sms(
-        str(compte.get("telephone") or ""), corps_sms(cle)))
+        str(compte.get("telephone") or ""), corps_sms(cle, licence)))
     resultat["sms"] = ok_sms
 
     canaux = [nom for nom, ok in (("email", ok_mail), ("sms", ok_sms)) if ok]
@@ -401,4 +457,15 @@ def diagnostic() -> Dict[str, Any]:
         "email_expediteur": masquer_email(_expediteur_email()),
         "sms": sms_configure(),
         "sms_fournisseur": fournisseur_sms(),
+        # Un émetteur configuré change ce que reçoit l'abonné : une licence
+        # utilisable partout, et non une clé qui exige la base des comptes.
+        "licence_signee": _emetteur_pret(),
     }
+
+
+def _emetteur_pret() -> bool:
+    try:
+        from licence import emetteur
+        return emetteur.disponible()
+    except Exception:
+        return False

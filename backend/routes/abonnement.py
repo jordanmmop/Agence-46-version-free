@@ -120,7 +120,7 @@ async def renvoyer_cle(response: Response) -> Dict[str, Any]:
     précisément celle dont on ne veut plus. Les installations déjà activées
     ne sont pas touchées — elles détiennent leur propre jeton signé.
     """
-    from licence import cles, comptes, notifications
+    from licence import comptes
 
     compte = comptes.compte_courant()
     if not compte:
@@ -143,20 +143,24 @@ async def renvoyer_cle(response: Response) -> Dict[str, Any]:
                                            f"avant d'en demander une autre."}
 
     import time as _time
+    from licence import stripe_paiement
     _dernieres_reemissions[compte["id"]] = _time.time()
-    emission = cles.remplacer(compte["id"], compte.get("formule") or "",
-                              compte.get("abonne_jusqua"))
-    cle = emission.get("cle", "")
-    if not cle:
+
+    # Même chemin que le paiement : l'abonné doit recevoir exactement ce que
+    # le webhook lui aurait remis — une licence signée quand le serveur peut
+    # en produire une, la clé courte sinon.
+    resultat = stripe_paiement.remettre_cle(
+        compte, compte.get("formule") or "", "", remplacer=True)
+    if not resultat.get("cle"):
         response.status_code = 500
-        return {"success": False, "error": "La clé n'a pas pu être émise."}
+        return {"success": False,
+                "error": resultat.get("cle_message",
+                                      "La clé n'a pas pu être émise.")}
 
-    envoi = notifications.envoyer_cle(compte, cle, compte.get("formule") or "")
-    cles.marquer_envoi(emission["enregistrement"]["cle_hash"], envoi.get("canaux", ""))
-
-    from licence.stripe_paiement import _message_envoi
-    return {"success": True, "cle": cle, "envoi": envoi,
-            "message": _message_envoi(envoi, compte),
+    return {"success": True, "cle": resultat["cle"],
+            "licence_signee": resultat.get("licence_signee", False),
+            "envoi": resultat.get("cle_envoi", {}),
+            "message": resultat.get("cle_message", ""),
             "avertissement": "Votre clé précédente a été remplacée : elle ne "
                              "fonctionne plus."}
 

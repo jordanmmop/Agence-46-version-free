@@ -226,8 +226,9 @@
                autocomplete="off" spellcheck="false">
         <button class="lic-btn lic-btn-pro" onclick="licenceActiver()">Activer</button>
       </div>
-      <p class="lic-detail">Votre clé vous a été envoyée par e-mail et par SMS
-      après la confirmation de votre paiement. Vous ne l'avez pas reçue ?
+      <p class="lic-detail">Votre clé d'abonnement — ou votre licence, selon la
+      configuration du serveur — vous a été envoyée après la confirmation de
+      votre paiement. Vous ne l'avez pas reçue ?
       <a href="#" onclick="return licenceDemanderCle(event)">Demandez-en une nouvelle</a>.</p>
       <div id="lic-activation" class="lic-result"></div>`;
     // Serveur sans secret Stripe : aucun paiement ne peut y être CONFIRMÉ.
@@ -265,8 +266,9 @@
         }
         const champ = document.getElementById('lic-cle');
         if (champ) champ.value = d.cle;
+        const quoi = d.licence_signee ? 'Votre licence est saisie' : 'Votre clé est saisie';
         sortie.innerHTML = '✅ ' + E(d.message || '')
-          + ' Votre clé est saisie ci-dessus : cliquez sur « Activer ».';
+          + ' ' + quoi + ' ci-dessus : cliquez sur « Activer ».';
       })
       .catch(() => { if (sortie) sortie.innerHTML = '❌ Serveur injoignable.'; });
     return false;

@@ -408,10 +408,16 @@ sudo chmod 600 /opt/agence/app/python/.env
 
 1. Stripe confirme le règlement (webhook signé, ou relecture de session).
 2. L'application ouvre les droits Pro du compte.
-3. Elle **émet une clé d'abonnement** : `AGF-XXXXX-XXXXX-XXXXX`.
-4. Elle l'envoie **par e-mail et par SMS**, sur les coordonnées du compte.
-5. L'abonné la colle dans « Passer à la version Pro » : son installation
-   enregistre alors une licence signée et fonctionne hors ligne jusqu'au terme.
+3. Elle **émet une clé d'abonnement** `AGF-XXXXX-XXXXX-XXXXX` — la trace
+   révocable, conservée en base sous forme d'empreinte.
+4. Si un **émetteur est configuré**, elle signe en plus une **licence**
+   `AGENCE1.…` valable jusqu'à l'échéance du compte. C'est elle qui est
+   remise, parce qu'elle fonctionne partout ; la clé courte sert de repli.
+5. L'envoi part **par e-mail** — et par SMS pour la clé courte. Une licence
+   de 200 caractères ne tient pas dans un SMS : celui-ci renvoie alors vers
+   l'e-mail plutôt que de livrer un identifiant tronqué.
+6. L'abonné colle ce qu'il a reçu dans « Passer à la version Pro ». Avec une
+   licence, son installation fonctionne ensuite hors ligne jusqu'au terme.
 
 Une clé n'est émise **qu'une fois par règlement** : le webhook et le retour du
 navigateur annoncent le même paiement, sans quoi l'abonné recevrait deux clés
@@ -521,11 +527,35 @@ sudo -u agence python scripts/abonnement.py activer alice@exemple.fr \
 > affirmez** avoir vu le règlement dans votre tableau de bord Stripe. La
 > référence demandée est ce qui permettra de le retrouver plus tard.
 
-### Émetteur de licences
+### Émetteur de licences — INDISPENSABLE si vos clients installent l'application
 
-Quand l'abonné active sa clé, le serveur signe un jeton Ed25519. Sans
-configuration, une paire de clés est créée au premier besoin dans
-`~/.agence_financiere/licence_emetteur.json` (**mode 600**).
+C'est ce point qui décide de ce que reçoit un abonné.
+
+| Vos clients utilisent… | Ce que le serveur doit remettre |
+|---|---|
+| l'application **installée sur leur poste** | une **licence signée** : elle se vérifie hors ligne, sans accès à votre base |
+| l'application **depuis leur navigateur**, sur votre serveur | la clé courte `AGF-…` suffit |
+
+Une clé courte se vérifie **dans la base des comptes**. Le poste d'un client
+n'y a pas accès — et ne doit jamais l'avoir : lui livrer les identifiants de
+la base donnerait à chacun un accès en écriture aux comptes de tous les
+autres. Sans émetteur configuré, un client sur poste reçoit donc une clé
+qu'il ne peut pas utiliser.
+
+**Créez l'émetteur avant d'ouvrir les ventes** (section 0 ter) : une fois sa
+clé publique embarquée dans l'application compilée, chaque paiement confirmé
+fait parvenir une licence signée, utilisable partout.
+
+Le serveur ne fabrique **jamais** de paire de clés tout seul sur le chemin du
+paiement : elle signerait des licences qu'aucune application installée ne
+saurait vérifier, sa clé publique n'ayant pas été embarquée à la compilation.
+L'abonné recevrait une licence d'apparence valide et inutilisable. En
+l'absence d'émetteur, le serveur retombe donc sur la clé courte.
+
+Quand l'abonné active sa clé, le serveur signe un jeton Ed25519 que
+l'installation revérifie ensuite seule, hors ligne, jusqu'à l'échéance. La
+paire de clés vit dans `~/.agence_financiere/licence_emetteur.json`
+(**mode 600**), créée par `scripts/abonnement.py emetteur`.
 
 Pour qu'un **seul** émetteur signe pour tout un parc, placez la clé privée sur
 ce serveur et la clé publique sur les postes :

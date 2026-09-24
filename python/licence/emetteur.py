@@ -164,17 +164,24 @@ def disponible() -> bool:
         or bool(_lire_fichier()))
 
 
-def emettre(sujet: str, expire_le: float) -> str:
+def emettre(sujet: str, expire_le: float, creer: bool = True) -> str:
     """Signe un jeton `AGENCE1.…` pour ce sujet, valable jusqu'à `expire_le`.
 
     Renvoie une chaîne VIDE si la signature est impossible — jamais un jeton
     de complaisance : un jeton non signé serait refusé à la vérification, et
     en fabriquer un donnerait l'illusion d'une activation réussie.
+
+    `creer=False` : ne fabrique PAS de paire de clés si aucune n'existe. C'est
+    ce que passe le chemin du paiement. Une paire créée toute seule sur le
+    serveur signerait des licences qu'AUCUNE application installée ne saurait
+    vérifier — sa clé publique n'ayant jamais été embarquée à la compilation.
+    L'abonné recevrait alors une licence d'apparence valide et inutilisable.
+    L'émetteur se crée donc explicitement, par `scripts/abonnement.py emetteur`.
     """
     Ed25519PrivateKey = _cryptographie()
     if Ed25519PrivateKey is None:
         return ""
-    privee = cle_privee(creer=True)
+    privee = cle_privee(creer=creer)
     if not privee:
         return ""
 

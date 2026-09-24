@@ -321,14 +321,20 @@
   // résoudra jamais.
   function blocRemiseCle(paiement) {
     const remise = (paiement && paiement.remise_cle) || {};
+    // Une licence signée fait ~200 caractères : elle part par e-mail, jamais
+    // par SMS, où elle se fragmenterait en deux messages à recopier à la main.
+    const quoi = remise.licence_signee
+      ? `<strong>licence d'abonnement</strong>` : `<strong>clé d'abonnement</strong>`;
     const canaux = [];
     if (remise.email) canaux.push('par e-mail');
-    if (remise.sms) canaux.push('par SMS');
+    if (remise.sms && !remise.licence_signee) canaux.push('par SMS');
+    const rappel = (remise.sms && remise.licence_signee)
+      ? ' Un SMS vous préviendra de son envoi.' : '';
     const phrase = canaux.length
-      ? `Dès votre paiement confirmé, votre <strong>clé d'abonnement</strong>
+      ? `Dès votre paiement confirmé, votre ${quoi}
          vous est envoyée ${canaux.join(' et ')}, sur les coordonnées de votre
-         compte. Collez-la ensuite dans « Passer à la version Pro ».`
-      : `Dès votre paiement confirmé, votre <strong>clé d'abonnement</strong>
+         compte.${rappel} Collez-la ensuite dans « Passer à la version Pro ».`
+      : `Dès votre paiement confirmé, votre ${quoi}
          s'affiche sur la page de retour. Notez-la : aucun envoi automatique
          n'est configuré sur ce serveur.`;
     return `<p class="cpt-note">${phrase}</p>
@@ -370,7 +376,9 @@
     // La clé n'est lisible QU'ICI : la base n'en garde que l'empreinte.
     sortie.innerHTML = `
       <div class="cpt-cle-boite">
-        <div class="cpt-cle-lib">Votre nouvelle clé d'abonnement</div>
+        <div class="cpt-cle-lib">${d.licence_signee
+          ? 'Votre nouvelle licence d\'abonnement'
+          : 'Votre nouvelle clé d\'abonnement'}</div>
         <div class="cpt-cle-val" id="cpt-cle-val">${E(d.cle)}</div>
         <div class="cpt-cle-aide">${E(d.message || '')}
         ${E(d.avertissement || '')} Conservez-la : elle ne pourra pas être

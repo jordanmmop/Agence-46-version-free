@@ -673,6 +673,11 @@ def test_documentation_couvre_la_remise_des_cles():
     """Une fonctionnalité qui demande une configuration serveur doit être
     documentée là où l'administrateur la cherche."""
     guide = (_RACINE / "DEPLOIEMENT.md").read_text(encoding="utf-8")
+    # Le guide doit dire QUAND une licence signée est indispensable : c'est la
+    # différence entre un abonné débloqué et un abonné qui reçoit une clé
+    # inutilisable sur son poste.
+    assert "INDISPENSABLE si vos clients installent" in guide
+    assert "ne fabrique **jamais** de paire de clés tout seul" in guide
     for element in ("AGF-XXXXX", "SMTP_HOTE", "TWILIO_ACCOUNT_SID",
                     "OVH_APPLICATION_KEY", "SMS_URL",
                     "scripts/abonnement.py", "AGENCE_LICENCE_PRIVKEY"):
@@ -739,6 +744,122 @@ def test_aucun_secret_en_dur_dans_les_nouveaux_modules():
                                            "KEY", "AUTORISATION")):
                 assert defaut == "", f"{nom} : {variable} a un défaut « {defaut} »"
     print("  OK — aucun identifiant d'envoi ni clé privée en dur")
+
+
+def test_paiement_livre_une_licence_utilisable_hors_base():
+    """LE raccord : ce que le serveur envoie doit marcher chez le client.
+
+    Une clé « AGF-… » se vérifie DANS LA BASE DES COMPTES. Le poste d'un
+    client n'y a pas accès — et ne doit jamais l'avoir, sinon chacun pourrait
+    écrire dans les comptes de tous. Dès qu'un émetteur est configuré, le
+    paiement doit donc remettre une LICENCE SIGNÉE, vérifiable hors ligne.
+    """
+    _isoler()
+    _neutraliser_envois()
+    from licence import abonnement, comptes, emetteur, stripe_paiement, verification
+    from licence.etat import EtatLicence
+
+    # L'éditeur a créé son émetteur (scripts/abonnement.py emetteur).
+    assert emetteur.cle_privee(creer=True)
+    publique = emetteur.cle_publique_hex()
+
+    compte = comptes.inscrire(_INSCRIPTION)
+    compte = comptes.activer_abonnement(compte["id"], "annuel", "cs_licence")
+    resultat = stripe_paiement.remettre_cle(compte, "annuel", "cs_licence")
+
+    assert resultat["licence_signee"] is True, resultat
+    assert resultat["cle"].startswith("AGENCE1."), "c'est la licence qu'on remet"
+    # La clé courte existe toujours : elle reste la trace révocable en base.
+    assert resultat["cle_courte"].startswith("AGF-")
+    assert len(comptes.depot().cles_du_compte(compte["id"])) == 1
+
+    # L'e-mail porte la licence en entier ; le SMS renvoie vers l'e-mail
+    # plutôt que de tronquer 200 caractères en deux messages facturés.
+    envois = {canal: corps for canal, _, corps in _envois}
+    assert resultat["cle"] in envois["email"], "la licence doit être dans l'e-mail"
+    assert "UNE SEULE LIGNE" in envois["email"]
+    assert resultat["cle"] not in envois["sms"]
+    assert "e-mail" in envois["sms"] or "mail" in envois["sms"]
+
+    # ── Le poste du client : aucune base partagée, aucun compte ──
+    licence = resultat["cle"]
+    origine_pub = verification.CLE_PUBLIQUE_EMETTEUR
+    origine_chemin = emetteur._chemin_fichier
+    dossier_client = Path(tempfile.mkdtemp())
+    verification.CLE_PUBLIQUE_EMETTEUR = publique
+    os.environ.pop("AGENCE_LICENCE_PUBKEY", None)
+    emetteur._chemin_fichier = lambda: dossier_client / "absent.json"
+    try:
+        comptes.definir_compte_courant(None)
+        abonnement.invalider_cache()
+        resultat_activation = abonnement.activer(licence)
+        assert resultat_activation["success"] is True, resultat_activation
+        assert abonnement.etat() is EtatLicence.PRO_ACTIVE
+        # L'échéance signée est celle de l'abonnement, pas une valeur en dur.
+        _, infos = verification.lire_jeton(licence)
+        assert infos["expire_le"] == int(compte["abonne_jusqua"])
+    finally:
+        verification.CLE_PUBLIQUE_EMETTEUR = origine_pub
+        emetteur._chemin_fichier = origine_chemin
+        abonnement.effacer_licence()
+        abonnement.invalider_cache()
+    print("  OK — le paiement livre une licence utilisable sans accès à la base")
+
+
+def test_serveur_ne_fabrique_pas_d_emetteur_tout_seul():
+    """Un émetteur né tout seul signerait des licences que personne ne vérifie.
+
+    Sa clé publique n'aurait jamais été embarquée à la compilation : l'abonné
+    recevrait une licence d'apparence valide et parfaitement inutilisable. Le
+    serveur retombe donc sur la clé courte, et n'invente rien.
+    """
+    dossier = _isoler()
+    _neutraliser_envois()
+    from licence import comptes, emetteur, stripe_paiement
+
+    origine = emetteur._chemin_fichier
+    emetteur._chemin_fichier = lambda: dossier / "aucun-emetteur.json"
+    os.environ.pop("AGENCE_LICENCE_PRIVKEY", None)
+    try:
+        assert emetteur.disponible() is False
+        compte = comptes.inscrire(_INSCRIPTION)
+        compte = comptes.activer_abonnement(compte["id"], "mensuel", "cs_sans")
+        resultat = stripe_paiement.remettre_cle(compte, "mensuel", "cs_sans")
+
+        assert resultat["licence_signee"] is False
+        assert resultat["cle"].startswith("AGF-"), "repli sur la clé courte"
+        assert not (dossier / "aucun-emetteur.json").exists(), \
+            "le serveur ne doit pas fabriquer de paire de clés tout seul"
+    finally:
+        emetteur._chemin_fichier = origine
+    print("  OK — aucun émetteur fabriqué en douce sur le chemin du paiement")
+
+
+def test_reemission_livre_la_meme_chose_que_le_paiement():
+    """Les trois voies doivent remettre la MÊME chose.
+
+    Webhook, bouton « Je n'ai pas reçu ma clé » et outil d'administration
+    passent par un seul chemin : sans cela, l'une d'elles finirait par livrer
+    une clé courte là où le paiement livre une licence.
+    """
+    _isoler()
+    _neutraliser_envois()
+    c = _app()
+    cid = _inscrire(c).json()["compte"]["id"]
+
+    from licence import emetteur
+    assert emetteur.cle_privee(creer=True)
+
+    r = _webhook(c, cid, "cs_trois_voies", 7879)
+    assert r.json()["licence_signee"] is True, r.text
+
+    from backend.routes import abonnement as routes_abonnement
+    routes_abonnement._dernieres_reemissions.clear()
+    r = c.post("/api/abonnement/cle")
+    assert r.status_code == 200, r.text
+    assert r.json()["licence_signee"] is True
+    assert r.json()["cle"].startswith("AGENCE1."), r.json()["cle"][:20]
+    print("  OK — réémission et paiement livrent la même chose")
 
 
 def test_licence_signee_debloque_un_poste_sans_serveur():
@@ -925,6 +1046,9 @@ def run():
         test_documentation_couvre_la_remise_des_cles()
         test_interface_propose_la_cle()
         test_aucun_secret_en_dur_dans_les_nouveaux_modules()
+        test_paiement_livre_une_licence_utilisable_hors_base()
+        test_serveur_ne_fabrique_pas_d_emetteur_tout_seul()
+        test_reemission_livre_la_meme_chose_que_le_paiement()
         test_licence_signee_debloque_un_poste_sans_serveur()
         test_outil_emetteur_et_licence_disponibles()
         test_diagnostic_nomme_le_premier_maillon_casse()

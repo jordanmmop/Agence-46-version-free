@@ -113,7 +113,7 @@ def cmd_activer(args) -> int:
 
 
 def cmd_cle(args) -> int:
-    from licence import cles, comptes, notifications
+    from licence import comptes, stripe_paiement
     compte = _compte(args.compte)
     etat = comptes.etat_du_compte(compte)
     if not etat.est_pro:
@@ -122,19 +122,21 @@ def cmd_cle(args) -> int:
               f"  confirmé de votre côté.")
         return 2
 
-    emission = cles.remplacer(compte["id"], compte.get("formule") or "",
-                              compte.get("abonne_jusqua"))
-    cle = emission.get("cle", "")
+    resultat = stripe_paiement.remettre_cle(
+        compte, compte.get("formule") or "", "", remplacer=True)
+    cle = resultat.get("cle", "")
     if not cle:
-        print("✗ La clé n'a pas pu être émise.")
+        print("✗ " + resultat.get("cle_message", "La clé n'a pas pu être émise."))
         return 1
-    envoi = notifications.envoyer_cle(compte, cle, compte.get("formule") or "")
-    cles.marquer_envoi(emission["enregistrement"]["cle_hash"], envoi.get("canaux", ""))
 
-    print(f"\n  CLÉ D'ABONNEMENT : {cle}\n")
-    for detail in envoi["details"]:
+    quoi = "LICENCE" if resultat.get("licence_signee") else "CLÉ D'ABONNEMENT"
+    print(f"\n  {quoi} À REMETTRE AU CLIENT :\n\n{cle}\n")
+    for detail in resultat.get("cle_envoi", {}).get("details", []):
         print(f"  · {detail}")
     print("\n  La clé précédente est révoquée. Celle-ci ne sera pas réaffichée.")
+    if resultat.get("licence_signee"):
+        print("  Cette licence se vérifie hors ligne : le poste du client n'a\n"
+              "  besoin d'aucun accès à votre base de comptes.")
     return 0
 
 
@@ -216,7 +218,7 @@ def cmd_licence(args) -> int:
     # un seul code d'envoi, donc un seul comportement à vérifier.
     faux_compte = {"id": destinataire, "email": destinataire,
                    "telephone": args.telephone or "", "abonne_jusqua": echeance}
-    envoi = notifications.envoyer_cle(faux_compte, jeton, args.formule)
+    envoi = notifications.envoyer_cle(faux_compte, "", args.formule, licence=jeton)
     for detail in envoi["details"]:
         print(f"  · {detail}")
     if not envoi["cle_remise"]:

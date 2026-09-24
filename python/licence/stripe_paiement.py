@@ -289,9 +289,54 @@ def _activer(compte_id: str, formule: str, reference: str,
     return resultat
 
 
+def _licence_signee(compte: Dict[str, Any]) -> str:
+    """Licence `AGENCE1.…` pour ce compte, ou chaîne vide s'il n'y a pas
+    d'émetteur configuré sur ce serveur.
+
+    POURQUOI CE DÉTOUR PLUTÔT QUE LA SEULE CLÉ COURTE
+    --------------------------------------------------
+    Une clé « AGF-… » se vérifie DANS LA BASE DES COMPTES. Cela suffit quand
+    l'application et la base sont au même endroit — un serveur qu'on utilise
+    depuis son navigateur. Mais quand l'application est installée sur le poste
+    de chaque client, ce poste n'a pas — et ne doit jamais avoir — les
+    identifiants de la base : les lui livrer donnerait à chaque client un accès
+    en écriture aux comptes de tous les autres.
+
+    Une licence signée, elle, porte sa propre preuve : le poste la vérifie avec
+    la clé PUBLIQUE embarquée à la compilation, sans accéder à quoi que ce
+    soit. C'est donc elle qu'on remet dès qu'on peut en produire une.
+
+    `creer=False` est essentiel : un serveur qui fabriquerait sa paire de clés
+    tout seul signerait des licences qu'aucune application installée ne sait
+    vérifier, sa clé publique n'ayant jamais été embarquée. L'émetteur se crée
+    explicitement, par `scripts/abonnement.py emetteur`.
+    """
+    echeance = compte.get("abonne_jusqua")
+    if not echeance:
+        return ""
+    try:
+        from licence import emetteur
+        if not emetteur.disponible():
+            return ""
+        return emetteur.emettre(compte.get("email") or compte["id"],
+                                float(echeance), creer=False)
+    except Exception as e:
+        logger.error("[stripe] Licence non signée pour %s : %s",
+                     compte.get("id"), e, exc_info=True)
+        return ""
+
+
 def remettre_cle(compte: Dict[str, Any], formule: str, reference: str,
-                 differer_envoi: bool = False) -> Dict[str, Any]:
-    """Émet la clé du compte (une seule par paiement) et la lui envoie.
+                 differer_envoi: bool = False,
+                 remplacer: bool = False) -> Dict[str, Any]:
+    """Remet à l'abonné ce qui débloquera son application, et le lui envoie.
+
+    UN SEUL chemin pour les trois voies — webhook Stripe, bouton « Je n'ai pas
+    reçu ma clé », outil d'administration — sans quoi l'une d'elles finirait
+    par livrer autre chose que les deux autres.
+
+    `remplacer` : révoque les clés en cours et en émet une neuve, au lieu de
+    respecter l'unicité par règlement. C'est ce que demande une réémission.
 
     Ne lève jamais : le paiement est encaissé et les droits sont ouverts. Une
     panne de SMTP ou de passerelle SMS ne doit pas faire répondre « échec » à
@@ -301,8 +346,12 @@ def remettre_cle(compte: Dict[str, Any], formule: str, reference: str,
     from licence import cles, notifications
 
     try:
-        emission = cles.emettre(
-            compte["id"], formule, reference, compte.get("abonne_jusqua"))
+        if remplacer:
+            emission = cles.remplacer(compte["id"], formule,
+                                      compte.get("abonne_jusqua"))
+        else:
+            emission = cles.emettre(compte["id"], formule, reference,
+                                    compte.get("abonne_jusqua"))
     except Exception as e:
         logger.error("[stripe] Clé d'abonnement non émise pour %s : %s",
                      compte.get("id"), e, exc_info=True)
@@ -317,25 +366,33 @@ def remettre_cle(compte: Dict[str, Any], formule: str, reference: str,
         return {"cle_emise": True, "cle_deja_emise": True,
                 "cle_message": "Votre clé d'abonnement vous a déjà été envoyée."}
 
-    cle = emission["cle"]
+    courte = emission["cle"]
     empreinte = emission["enregistrement"]["cle_hash"]
+    licence = _licence_signee(compte)
+    # Ce que l'abonné colle : la licence quand elle existe — elle fonctionne
+    # partout, y compris là où la clé courte ne peut rien.
+    remis = licence or courte
 
     def _envoi() -> Dict[str, Any]:
-        envoi = notifications.envoyer_cle(compte, cle, formule)
+        envoi = notifications.envoyer_cle(compte, courte, formule, licence)
         cles.marquer_envoi(empreinte, envoi.get("canaux", ""))
         return envoi
 
+    quoi = "licence" if licence else "clé"
     if differer_envoi:
         threading.Thread(target=_envoi, name="envoi-cle", daemon=True).start()
         return {"cle_emise": True, "cle_envoi_differe": True,
-                "cle_message": "Votre clé d'abonnement vous est envoyée."}
+                "licence_signee": bool(licence),
+                "cle_message": f"Votre {quoi} d'abonnement vous est envoyée."}
 
     envoi = _envoi()
-    return {"cle_emise": True, "cle": cle, "cle_envoi": envoi,
-            "cle_message": _message_envoi(envoi, compte)}
+    return {"cle_emise": True, "cle": remis, "cle_courte": courte,
+            "licence_signee": bool(licence), "cle_envoi": envoi,
+            "cle_message": _message_envoi(envoi, compte, quoi)}
 
 
-def _message_envoi(envoi: Dict[str, Any], compte: Dict[str, Any]) -> str:
+def _message_envoi(envoi: Dict[str, Any], compte: Dict[str, Any],
+                   quoi: str = "clé") -> str:
     """Phrase montrée à l'abonné — exacte, y compris quand rien n'est parti."""
     from licence import notifications
     parties = []
@@ -344,8 +401,8 @@ def _message_envoi(envoi: Dict[str, Any], compte: Dict[str, Any]) -> str:
     if envoi.get("sms"):
         parties.append(f"par SMS au {notifications.masquer_telephone(compte.get('telephone', ''))}")
     if parties:
-        return "Votre clé d'abonnement vous a été envoyée " + " et ".join(parties) + "."
-    return ("Votre clé d'abonnement est affichée à l'écran : aucun envoi "
+        return f"Votre {quoi} d'abonnement vous a été envoyée " + " et ".join(parties) + "."
+    return (f"Votre {quoi} d'abonnement est affichée à l'écran : aucun envoi "
             "automatique n'a abouti, notez-la dès maintenant.")
 
 
