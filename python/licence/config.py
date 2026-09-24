@@ -164,14 +164,22 @@ MOT_DE_PASSE_MIN = 8
 # C'est ce qui permet de passer en production sur un serveur déjà installé —
 # et de revenir en test — sans reconstruire l'application.
 #
-# ⚠️ VALEURS PAR DÉFAUT : liens Stripe de TEST (« /test_ »). Ils n'encaissent
-# AUCUN paiement réel. Créez vos liens en mode « Live » dans le tableau de bord
-# Stripe et mettez-les ici (ou dans les variables ci-dessus) avant toute mise
-# en vente. L'application signale d'elle-même qu'elle est en mode test, dans
-# l'écran d'abonnement et dans `scripts/verifier-serveur.sh`.
+# LIENS DE PRODUCTION — ils encaissent des paiements RÉELS.
+#
+# Vérifiés en ouvrant chaque page : le lien mensuel facture bien 78,79 € par
+# mois et l'annuel 849,99 € par an (les pages affichent ces montants convertis
+# dans la devise du visiteur). Un mappage inversé ferait payer 849,99 € pour un
+# mois : c'est pourquoi la correspondance a été contrôlée sur les pages
+# elles-mêmes, et non seulement recopiée.
+#
+# ⚠️ Les deux liens accordent un ESSAI DE 3 JOURS côté Stripe (« 3 days free »).
+# Conséquence à connaître : le premier événement reçu à la souscription porte un
+# montant de ZÉRO, puisque rien n'est encore encaissé. La formule ne peut donc
+# pas être déduite du seul montant — voir `_formule_depuis_evenement` dans
+# licence/stripe_paiement.py.
 
-LIEN_PAIEMENT_MENSUEL_DEFAUT = "https://buy.stripe.com/test_aFaaEX7ol6Nc9ZsewvdZ601"
-LIEN_PAIEMENT_ANNUEL_DEFAUT = "https://buy.stripe.com/test_00w8wP3851sS0oS1JJdZ602"
+LIEN_PAIEMENT_MENSUEL_DEFAUT = "https://buy.stripe.com/00w00l1Qn1hI8x4cgI4wM03"
+LIEN_PAIEMENT_ANNUEL_DEFAUT = "https://buy.stripe.com/7sY9AVamT0dE00yeoQ4wM04"
 
 # Préfixe exigé pour tout lien de paiement. Un lien mal collé (page du tableau
 # de bord, lien raccourci, adresse d'hameçonnage glissée dans une variable

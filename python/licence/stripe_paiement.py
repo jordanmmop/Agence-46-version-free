@@ -133,6 +133,95 @@ def _formule_depuis_montant(montant_centimes: Optional[int],
     return defaut
 
 
+# Correspondance entre la périodicité déclarée par Stripe et nos formules.
+_PERIODE_STRIPE = {"month": "mensuel", "year": "annuel"}
+
+
+def _formule_depuis_periodicite(objet: Dict[str, Any]) -> str:
+    """Formule déduite de la PÉRIODICITÉ de l'abonnement (« month » / « year »).
+
+    Indispensable à cause de l'essai de 3 jours configuré sur les liens de
+    paiement : à la souscription, Stripe n'encaisse RIEN et envoie donc un
+    événement dont le montant vaut zéro. Le montant ne permet alors plus de
+    distinguer un abonné mensuel d'un abonné annuel — et le repli sur la
+    formule par défaut aurait accordé 34 jours de droits à quelqu'un venant de
+    souscrire un an.
+
+    On cherche la périodicité là où Stripe la place selon le type d'objet :
+    lignes de facture, éléments de session, ou abonnement développé.
+    """
+    def _interval(prix: Any) -> str:
+        if isinstance(prix, dict):
+            recurrent = prix.get("recurring")
+            if isinstance(recurrent, dict):
+                return str(recurrent.get("interval") or "")
+        return ""
+
+    chemins = []
+    for conteneur in ("lines", "line_items"):          # facture, session
+        bloc = objet.get(conteneur)
+        if isinstance(bloc, dict):
+            chemins.extend(bloc.get("data") or [])
+    abonnement_dev = objet.get("subscription")
+    if isinstance(abonnement_dev, dict):
+        articles = abonnement_dev.get("items")
+        if isinstance(articles, dict):
+            chemins.extend(articles.get("data") or [])
+
+    for ligne in chemins:
+        if not isinstance(ligne, dict):
+            continue
+        for cle in ("price", "plan"):
+            formule = _PERIODE_STRIPE.get(_interval(ligne.get(cle)))
+            if formule:
+                return formule
+    return ""
+
+
+def _articles_de_session(session_id: str) -> Dict[str, Any]:
+    """Lignes d'une session de paiement, lues via l'API (prix développé).
+
+    Dernier recours quand l'événement lui-même ne porte pas la périodicité :
+    Stripe n'inclut pas les articles dans la charge utile du webhook.
+    """
+    if not session_id:
+        return {}
+    reponse = _get_stripe(f"checkout/sessions/{session_id}/line_items",
+                          {"expand[]": "data.price"})
+    return {"line_items": reponse} if reponse else {}
+
+
+def _formule_depuis_evenement(objet: Dict[str, Any], defaut: str = "") -> str:
+    """Formule d'un paiement, par ordre de fiabilité décroissante.
+
+    1. Le MONTANT encaissé : c'est ce que le client a réellement payé.
+    2. La PÉRIODICITÉ portée par l'événement : seul recours pendant l'essai
+       Stripe, où le montant vaut zéro.
+    3. La périodicité relue via l'API, quand l'événement ne la porte pas.
+
+    Ne retombe sur `defaut` qu'en dernier ressort, et l'appelant journalise
+    alors l'incertitude : accorder la mauvaise formule est silencieux pour nous
+    et coûteux pour l'abonné.
+    """
+    montant = objet.get("amount_total")
+    if montant is None:
+        montant = objet.get("amount_paid")
+    formule = _formule_depuis_montant(montant)
+    if formule:
+        return formule
+
+    formule = _formule_depuis_periodicite(objet)
+    if formule:
+        return formule
+
+    identifiant = str(objet.get("id") or "")
+    if identifiant.startswith("cs_"):
+        formule = _formule_depuis_periodicite(_articles_de_session(identifiant))
+        if formule:
+            return formule
+    return defaut
+
+
 # ═══════════════════════════ RELECTURE D'UNE SESSION ══════════════════════
 
 def verifier_session(session_id: str) -> Dict[str, Any]:
@@ -166,8 +255,12 @@ def verifier_session(session_id: str) -> Dict[str, Any]:
                 "error": "Ce paiement n'est rattaché à aucun compte. "
                          "Contactez le support avec la référence " + session_id}
 
-    formule = _formule_depuis_montant(session.get("amount_total"),
-                                      lconfig.FORMULE_DEFAUT)
+    formule = _formule_depuis_evenement(session)
+    if not formule:
+        logger.error("[stripe] Formule indéterminable pour la session %s — "
+                     "repli sur « %s ». Vérifiez la périodicité du lien de "
+                     "paiement.", session_id, lconfig.FORMULE_DEFAUT)
+        formule = lconfig.FORMULE_DEFAUT
     return _activer(compte_id, formule, session_id)
 
 
@@ -263,8 +356,15 @@ def traiter_webhook(charge: bytes, entete_signature: str) -> Dict[str, Any]:
             logger.error("[stripe] Paiement sans compte rattaché : %s",
                          objet.get("id"))
             return {"success": True, "ignore": "paiement sans compte rattaché"}
-        montant = objet.get("amount_total") or objet.get("amount_paid")
-        formule = _formule_depuis_montant(montant, lconfig.FORMULE_DEFAUT)
+        formule = _formule_depuis_evenement(objet)
+        if not formule:
+            # L'essai Stripe fait arriver un montant nul : sans périodicité
+            # lisible non plus, on ne peut qu'avertir. Accorder la mauvaise
+            # formule est silencieux pour nous, coûteux pour l'abonné.
+            logger.error("[stripe] Formule indéterminable (%s, objet %s) — "
+                         "repli sur « %s »", type_evt, objet.get("id"),
+                         lconfig.FORMULE_DEFAUT)
+            formule = lconfig.FORMULE_DEFAUT
         resultat = _activer(compte_id, formule, str(objet.get("id") or ""))
         resultat.setdefault("evenement", type_evt)
         return resultat

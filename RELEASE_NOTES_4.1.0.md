@@ -76,14 +76,19 @@ toutes les routes, seul l'écran d'abonnement reste joignable.
 
 ### Deux formules
 
-| Formule | Prix |
-|---|---|
-| Pro mensuel | **78,79 €** / mois |
-| Pro annuel | **849,99 €** / an |
+| Formule | Prix | Essai Stripe |
+|---|---|---|
+| Pro mensuel | **78,79 €** / mois | 3 jours |
+| Pro annuel | **849,99 €** / an | 3 jours |
 
-Les liens de paiement se règlent dans `python/licence/config.py`, ou sans
+Les liens de paiement livrés sont ceux de **production** : ils encaissent des
+règlements réels. Ils se règlent dans `python/licence/config.py`, ou sans
 recompiler par `STRIPE_LIEN_MENSUEL` / `STRIPE_LIEN_ANNUEL`. Tout lien qui ne
 commence pas par `https://buy.stripe.com/` est refusé.
+
+Au-delà des 3 jours d'essai de l'application, les liens accordent **3 jours
+supplémentaires côté Stripe** avant le premier prélèvement. L'abonnement est
+actif dès la souscription : l'abonné n'attend pas d'avoir été débité.
 
 ### Comment un paiement est confirmé
 
@@ -97,6 +102,12 @@ toutes deux côté serveur :
 
 La **formule est déduite du montant réellement encaissé**, jamais d'un
 paramètre d'URL : on ne choisit pas l'annuel en réglant le tarif mensuel.
+
+Pendant l'essai Stripe, ce montant vaut **zéro** — rien n'est encore prélevé.
+La formule est alors déduite de la **périodicité de l'abonnement** (`month` /
+`year`), relue au besoin via l'API. Sans cela, un abonné annuel n'aurait reçu
+que les droits d'un mois : le défaut aurait été silencieux jusqu'à sa
+suspension, un mois après avoir payé un an.
 
 Sans ces secrets, aucun paiement ne peut être confirmé — l'application le dit
 et le compte reste fermé.

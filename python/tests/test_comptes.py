@@ -700,8 +700,8 @@ def test_liens_de_paiement_surchargeables_et_valides():
         for k in ancien:
             os.environ.pop(k, None)
         importlib.reload(lc)
-        assert lc.lien_de_test(lc.FORMULES["mensuel"]["lien_paiement"]), \
-            "les liens livrés devraient être des liens de test"
+        assert lc.FORMULES["mensuel"]["lien_paiement"].startswith(
+            lc.PREFIXE_LIEN_STRIPE), "lien par défaut inattendu"
 
         # 2. Avec variables : liens de production, sans recompilation.
         os.environ["STRIPE_LIEN_MENSUEL"] = "https://buy.stripe.com/4gwPRODM"
@@ -744,6 +744,10 @@ def test_incoherence_cle_et_liens_detectee():
              ("STRIPE_SECRET_KEY", "STRIPE_LIEN_MENSUEL", "STRIPE_LIEN_ANNUEL")}
     LIVE = {"STRIPE_LIEN_MENSUEL": "https://buy.stripe.com/4gwPRODM",
             "STRIPE_LIEN_ANNUEL": "https://buy.stripe.com/8xyPRODA"}
+    # Les liens LIVRÉS sont désormais ceux de production : pour éprouver le cas
+    # « test + test », il faut donc poser explicitement des liens de test.
+    TEST = {"STRIPE_LIEN_MENSUEL": "https://buy.stripe.com/test_M",
+            "STRIPE_LIEN_ANNUEL": "https://buy.stripe.com/test_A"}
     try:
         import licence.config as lc
         import licence.stripe_paiement as sp
@@ -756,7 +760,7 @@ def test_incoherence_cle_et_liens_detectee():
             importlib.reload(sp)
             return sp.incoherence_environnement()
 
-        assert alerte({"STRIPE_SECRET_KEY": "sk_test_x"}) == "", \
+        assert alerte({"STRIPE_SECRET_KEY": "sk_test_x", **TEST}) == "", \
             "test + test ne devrait pas alerter"
         assert alerte({"STRIPE_SECRET_KEY": "sk_live_x", **LIVE}) == "", \
             "live + live ne devrait pas alerter"
@@ -764,15 +768,23 @@ def test_incoherence_cle_et_liens_detectee():
         grave = alerte({"STRIPE_SECRET_KEY": "sk_test_x", **LIVE})
         assert "DANGER" in grave and "suspendu" in grave, grave
 
-        manque = alerte({"STRIPE_SECRET_KEY": "sk_live_x"})
+        manque = alerte({"STRIPE_SECRET_KEY": "sk_live_x", **TEST})
         assert "TEST" in manque and "encaiss" in manque, manque
 
         melange = alerte({"STRIPE_SECRET_KEY": "sk_live_x",
-                          "STRIPE_LIEN_MENSUEL": LIVE["STRIPE_LIEN_MENSUEL"]})
+                          "STRIPE_LIEN_MENSUEL": LIVE["STRIPE_LIEN_MENSUEL"],
+                          "STRIPE_LIEN_ANNUEL": TEST["STRIPE_LIEN_ANNUEL"]})
         assert "mélangent" in melange, melange
 
         # Sans clé configurée, aucune alerte : rien n'est encore branché.
         assert alerte({}) == ""
+
+        # Les liens LIVRÉS sont ceux de production : les utiliser avec une clé
+        # de test est le cas dangereux, il doit être signalé sans rien poser
+        # d'autre que la clé.
+        livres = alerte({"STRIPE_SECRET_KEY": "sk_test_x"})
+        assert "DANGER" in livres, (
+            "clé de test + liens de production livrés : aucune alerte")
     finally:
         for k, v in sauve.items():
             if v is None:
@@ -812,11 +824,22 @@ def test_liens_de_paiement_exacts():
     """Les deux liens fournis, à la lettre."""
     from licence import config as lconfig
     assert lconfig.FORMULES["mensuel"]["lien_paiement"] == \
-        "https://buy.stripe.com/test_aFaaEX7ol6Nc9ZsewvdZ601"
+        "https://buy.stripe.com/00w00l1Qn1hI8x4cgI4wM03"
     assert lconfig.FORMULES["annuel"]["lien_paiement"] == \
-        "https://buy.stripe.com/test_00w8wP3851sS0oS1JJdZ602"
+        "https://buy.stripe.com/7sY9AVamT0dE00yeoQ4wM04"
     assert lconfig.FORMULES["mensuel"]["prix"] == 78.79
     assert lconfig.FORMULES["annuel"]["prix"] == 849.99
+
+    # Liens de PRODUCTION : plus aucun « /test_ ». Un retour en arrière
+    # involontaire ferait cliquer les clients sur un lien qui n'encaisse rien.
+    for f in lconfig.FORMULES.values():
+        assert not lconfig.lien_de_test(f["lien_paiement"]), \
+            f"la formule « {f['id']} » pointe encore vers l'environnement de test"
+
+    # Et les deux formules doivent rester DISTINCTES : un copier-coller qui
+    # duplique un lien ferait facturer le même montant dans les deux cas.
+    liens = {f["lien_paiement"] for f in lconfig.FORMULES.values()}
+    assert len(liens) == len(lconfig.FORMULES), "deux formules partagent un lien"
     print("  OK — liens Stripe et tarifs conformes")
 
 

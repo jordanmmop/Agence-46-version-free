@@ -84,13 +84,12 @@ les deux.
 
 | Formule | Prix | Lien de paiement |
 |---|---|---|
-| Mensuel | **78,79 €** / mois | `buy.stripe.com/test_aFaaEX7ol6Nc9ZsewvdZ601` |
-| Annuel | **849,99 €** / an | `buy.stripe.com/test_00w8wP3851sS0oS1JJdZ602` |
+| Mensuel | **78,79 €** / mois | `https://buy.stripe.com/00w00l1Qn1hI8x4cgI4wM03` |
+| Annuel | **849,99 €** / an | `https://buy.stripe.com/7sY9AVamT0dE00yeoQ4wM04` |
 
-> ⚠️ Ces liens sont des liens Stripe **de test** : ils n'encaissent aucun
-> paiement réel. Les remplacer par les liens de production dans
-> `python/licence/config.py` avant toute mise en vente — c'est le seul
-> changement à faire.
+Les deux liens accordent en outre **3 jours d'essai côté Stripe** avant le
+premier prélèvement. Ils se remplacent sans recompiler, par les variables
+`STRIPE_LIEN_MENSUEL` et `STRIPE_LIEN_ANNUEL`.
 
 Une fois le règlement **confirmé par Stripe**, le compte passe en `abonné` et
 l'intégralité des agents IA et des fonctionnalités avancées est débloquée.

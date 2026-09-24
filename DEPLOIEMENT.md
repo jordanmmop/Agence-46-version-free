@@ -199,9 +199,10 @@ sudo -u agence /opt/agence/venv/bin/python python/tests/run_tests.py
 
 ### 3.1 Passer les liens en production
 
-Les liens livrés sont des liens **de test** (`/test_`) : ils n'encaissent rien.
-Créez vos deux liens de paiement en mode **Live** (Stripe → Paiements → Liens
-de paiement), puis remplacez-les dans **`python/licence/config.py`** :
+Les liens livrés sont désormais ceux de **production** : ils encaissent des
+paiements réels. Cette section ne sert donc qu'à les remplacer — par exemple
+pour repasser en test, ou après avoir régénéré un lien. Ils vivent dans
+**`python/licence/config.py`** :
 
 ```python
 FORMULES = {

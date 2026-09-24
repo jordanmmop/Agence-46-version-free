@@ -162,9 +162,10 @@ ou une relecture de session via l'API (`STRIPE_SECRET_KEY`) ouvre les droits,
 et la formule est déduite du **montant réellement encaissé**. Sans ces
 secrets, aucun paiement ne peut être confirmé et l'application le dit.
 
-⚠️ Les liens de paiement livrés pointent vers l'environnement **de test** de
-Stripe. Les remplacer par les liens de production dans
-`python/licence/config.py` avant toute mise en vente.
+Les liens de paiement livrés sont ceux de **production** : ils encaissent des
+règlements réels, et accordent 3 jours d'essai Stripe avant le premier
+prélèvement. Ils se remplacent dans `python/licence/config.py`, ou sans
+recompiler par `STRIPE_LIEN_MENSUEL` / `STRIPE_LIEN_ANNUEL`.
 
 **Mise en ligne sur votre serveur** (Stripe, webhook, HTTPS, systemd, nginx,
 sauvegardes) : [`DEPLOIEMENT.md`](DEPLOIEMENT.md).
