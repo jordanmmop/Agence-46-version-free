@@ -19,6 +19,7 @@ import test_licence
 import test_comptes
 import test_depot_comptes
 import test_cles_abonnement
+import test_novia_licence
 
 
 def main():
@@ -27,7 +28,7 @@ def main():
                test_indicators, test_features, test_performance,
                test_moteur_ia, test_installation, test_msix,
                test_licence, test_comptes, test_depot_comptes,
-               test_cles_abonnement]
+               test_cles_abonnement, test_novia_licence]
     echecs = 0
     for mod in modules:
         try:

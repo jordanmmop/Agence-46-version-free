@@ -262,7 +262,11 @@
         </div>
 
         <div class="tools-section">
-          <h3>★ Offre &amp; abonnement</h3>
+          <h3 id="lic-tools-titre">★ Offre &amp; abonnement</h3>
+          <!-- Mode licence Novia : fiche de licence et ses quatre actions. -->
+          <div id="lic-mode-novia" style="display:none"></div>
+          <!-- Mode compte local : comportement d'origine, inchangé. -->
+          <div id="lic-mode-compte">
           <p class="tools-hint">Version en cours, agents débloqués et requêtes restantes.
           Les limites sont appliquées par le serveur de l'application : cet écran les
           affiche, il ne les fixe pas.</p>
@@ -275,6 +279,7 @@
             <button onclick="licencePasserPro()">Activer une licence</button>
             <button onclick="licenceVoirOffre()">Voir les fonctionnalités Pro</button>
             <button onclick="licenceEcranEssai()">Version d'essai : ce qui est limité</button>
+          </div>
           </div>
           <p class="tools-hint" style="margin-top:12px">Disponible également sur le Microsoft Store</p>
           <div class="tools-row">
@@ -320,6 +325,24 @@
     const d = await jf('/api/licence');
     if (!d) { el.textContent = 'État de l\'offre indisponible.'; return; }
     if (typeof window.licenceAppliquer === 'function') window.licenceAppliquer(d);
+
+    // Mode Novia : la section devient « Licence » (activation, appareil,
+    // hors ligne). Le compte local et l'abonnement Stripe n'y ont plus cours.
+    const novia = d.mode_licence === 'novia';
+    const zoneNovia = document.getElementById('lic-mode-novia');
+    const zoneCompte = document.getElementById('lic-mode-compte');
+    const titre = document.getElementById('lic-tools-titre');
+    if (zoneNovia && zoneCompte) {
+      zoneNovia.style.display = novia ? '' : 'none';
+      zoneCompte.style.display = novia ? 'none' : '';
+    }
+    if (titre) titre.textContent = novia ? '🔑 Licence' : '★ Offre & abonnement';
+    if (novia) {
+      if (typeof window.activationPeindreReglages === 'function') {
+        window.activationPeindreReglages(zoneNovia);
+      }
+      return;
+    }
     const a = d.agents || {}, q = d.quotas || {};
     const compte = d.compte || {};
     const essai = d.essai || {};

@@ -79,8 +79,26 @@
   // C'est l'état renvoyé par le serveur qui tranche, jamais une préférence
   // locale : un compte suspendu doit revoir le mur de paiement à chaque
   // chargement, même s'il a fermé la fenêtre la fois précédente.
+  // Mode Novia : l'application attend une LICENCE, pas un compte. Toute
+  // situation qui la ferme (aucune clé, clé invalide, licence expirée en
+  // politique « bloque ») mène à l'écran d'activation — jamais à
+  // l'inscription ni au paiement Stripe, qui vivent sur le site Novia.
+  // Renvoie vrai quand c'est elle qui a décidé de l'écran.
+  function arbitrerLicenceNovia() {
+    if (etat.licence_requise) {
+      if (ecranOuvert) fermerEcran();
+      if (typeof window.activationOuvrir === 'function') window.activationOuvrir();
+      return true;
+    }
+    if (typeof window.activationFermerSiBloquant === 'function') {
+      window.activationFermerSiBloquant();
+    }
+    return false;
+  }
+
   function arbitrerEcran() {
     if (!etat) return;
+    if (arbitrerLicenceNovia()) return;
     if (etat.compte_requis) {
       // DÉJÀ ouvert : ne rien faire. Rouvrir détruisait et reconstruisait le
       // formulaire — effaçant ce que l'utilisateur était en train de taper et

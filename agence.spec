@@ -114,6 +114,13 @@ hiddenimports = _app_modules + [
     "licence.cles",
     "licence.notifications",
     "licence.emetteur",
+    # Licences Agence Novia : sans eux, le mode Novia ne pourrait ni vérifier
+    # une licence ni joindre le serveur — et l'application resterait fermée.
+    "licence.license_state",
+    "licence.license_manager",
+    "licence.jeton_novia",
+    "licence.novia_client",
+    "backend.routes.activation",
     "backend.routes.licence",
     "backend.routes.comptes",
     "backend.routes.abonnement",

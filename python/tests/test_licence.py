@@ -359,8 +359,11 @@ def test_licence_expiree_revient_a_lessai():
 
 def test_etats_du_cycle_de_vie():
     from licence.etat import EtatLicence
-    attendus = {"COMPTE_REQUIS", "TRIAL", "TRIAL_EXPIRED", "PRO_ACTIVE",
-                "PRO_EXPIRED", "PAYMENT_REQUIRED", "SUSPENDU"}
+    # LICENCE_REQUISE : ajouté avec le mode licence Novia — le pendant de
+    # COMPTE_REQUIS quand l'application attend une clé plutôt qu'un compte.
+    # Il ne rend RIEN utilisable, et les invariants ci-dessous le vérifient.
+    attendus = {"COMPTE_REQUIS", "LICENCE_REQUISE", "TRIAL", "TRIAL_EXPIRED",
+                "PRO_ACTIVE", "PRO_EXPIRED", "PAYMENT_REQUIRED", "SUSPENDU"}
     assert {e.value for e in EtatLicence} == attendus
     # UN SEUL état débloque les fonctionnalités Pro.
     assert [e.value for e in EtatLicence if e.est_pro] == ["PRO_ACTIVE"]
@@ -369,7 +372,7 @@ def test_etats_du_cycle_de_vie():
         ["PRO_ACTIVE", "TRIAL"]
     # Une valeur inconnue retombe sur l'état le plus FERMÉ, jamais sur l'essai.
     assert EtatLicence.depuis("n_importe_quoi") is EtatLicence.COMPTE_REQUIS
-    print("  OK — 7 états, 1 seul Pro, 2 seuls utilisables, repli fermé")
+    print("  OK — 8 états, 1 seul Pro, 2 seuls utilisables, repli fermé")
 
 
 def test_aucun_faux_paiement():

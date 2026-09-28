@@ -180,6 +180,80 @@ def _calculer_etat() -> Dict[str, Any]:
     }
 
 
+# ═══════════════════════════ MODE LICENCE NOVIA ═══════════════════════════
+
+_LIBELLES_NOVIA = {
+    "EXPIRED": "Licence expirée",
+    "SUSPENDED": "Licence suspendue",
+    "REVOKED": "Licence révoquée",
+}
+
+
+def _vers_etat_licence(novia: Dict[str, Any]) -> EtatLicence:
+    """Traduit l'état Novia dans le vocabulaire du feature gate.
+
+    Le gate ne connaît que deux régimes utilisables : complet (PRO_ACTIVE) et
+    limité (TRIAL, avec les limites de la version d'essai). La traduction est
+    faite ICI, une fois, pour que ni le gate ni les agents n'aient à connaître
+    Novia.
+
+        licence valide, niveau payant      → PRO_ACTIVE      accès complet
+        licence valide, niveau FREE        → TRIAL           limité
+        suspendue, révoquée                → TRIAL           premium coupé,
+                                                              données intactes
+        expirée                            → selon LICENSE_EXPIRED_POLICY :
+                                             TRIAL (« limite ») ou
+                                             PRO_EXPIRED (« bloque »)
+        aucune licence, jeton invalide     → LICENCE_REQUISE écran d'activation
+    """
+    if novia.get("valide"):
+        return EtatLicence.PRO_ACTIVE if novia.get("premium") else EtatLicence.TRIAL
+    etat = novia.get("etat")
+    if etat in ("SUSPENDED", "REVOKED"):
+        return EtatLicence.TRIAL
+    if etat == "EXPIRED":
+        return (EtatLicence.PRO_EXPIRED if lconfig.LICENSE_EXPIRED_POLICY == "bloque"
+                else EtatLicence.TRIAL)
+    return EtatLicence.LICENCE_REQUISE
+
+
+def _etat_novia() -> Dict[str, Any]:
+    """État issu du LicenseManager — 100 % local, aucun accès réseau."""
+    from licence import license_manager
+    novia = license_manager.manager().etat()
+    etat = _vers_etat_licence(novia)
+    if novia.get("valide"):
+        libelle = f"Agence 46 {novia.get('niveau', 'PRO')}"
+    else:
+        libelle = _LIBELLES_NOVIA.get(novia.get("etat"), etat.libelle)
+    return {
+        "etat": etat.value,
+        "libelle": libelle,
+        "message": novia.get("message") or etat.message,
+        "est_pro": etat.est_pro,
+        "utilisable": etat.utilisable,
+        "compte_suspendu": False,
+        "sujet": novia.get("licence_id", ""),
+        "expire_le": novia.get("expire_le"),
+        "fournisseur": "novia",
+        "novia": novia,
+        "verifie_le": int(time.time()),
+    }
+
+
+def etat_acces(compte: Optional[Dict[str, Any]]) -> EtatLicence:
+    """État qui décide si une requête HTTP passe — lu par le middleware.
+
+    Mode Novia : la LICENCE décide, aucun compte local n'est exigé — le compte
+    de l'utilisateur vit sur le site Novia. Sinon : comportement d'origine, le
+    compte local décide.
+    """
+    if lconfig.novia_actif():
+        return EtatLicence.depuis(etat_complet().get("etat"))
+    from licence import comptes
+    return comptes.etat_du_compte(compte)
+
+
 def etat_complet(forcer: bool = False) -> Dict[str, Any]:
     """État d'abonnement, mis en cache `LICENCE_CACHE_S` secondes.
 
@@ -187,6 +261,19 @@ def etat_complet(forcer: bool = False) -> Dict[str, Any]:
     gardée : sans cache, chaque battement de cœur du tableau de bord relirait
     la configuration sur disque.
     """
+    # Mode Novia : la licence Novia fait foi. Une licence signée « AGENCE1 »
+    # (licence d'entreprise ou émise par le support) l'emporte si elle ouvre
+    # davantage — même règle que pour le compte local ci-dessous.
+    if lconfig.novia_actif():
+        novia = _etat_novia()
+        if not novia.get("est_pro"):
+            signee = _calculer_etat()
+            if signee.get("est_pro"):
+                signee["utilisable"] = True
+                signee["novia"] = novia["novia"]
+                return signee
+        return novia
+
     # Un compte connecté n'est JAMAIS mis en cache : le cache est global au
     # processus, alors que le compte change d'une requête à l'autre (plusieurs
     # appareils du même Wi-Fi, déconnexion, fin d'essai à la minute près).

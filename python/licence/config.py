@@ -256,3 +256,161 @@ LICENCE_CACHE_S = 6 * 3600
 # machines ne sont jamais parfaitement à l'heure, et une licence valable ne
 # doit pas être refusée pour quelques secondes de dérive.
 LICENCE_TOLERANCE_HORLOGE_S = 300
+
+
+# ═══════════════════════════ LICENCES AGENCE NOVIA ════════════════════════
+#
+# Agence 46 reste une application LOCALE : données, projets, SQLite, modèles
+# et Ollama ne quittent jamais la machine. Le SEUL échange réseau de ce
+# système est l'activation / la revalidation d'une licence achetée sur le
+# site Agence Novia — et il ne transporte que quatre champs (voir
+# licence/novia_client.py).
+#
+# MODE NOVIA
+# ----------
+# Il s'active quand l'URL de l'API ET au moins une clé publique sont
+# configurées. Tant qu'il manque l'une des deux, l'application garde
+# EXACTEMENT son fonctionnement actuel (compte local, essai, Stripe) : c'est
+# ce qui permet de livrer ce code avant que le serveur Novia n'existe, sans
+# rien casser. Une URL sans clé publique ne suffit pas : aucune licence ne
+# pourrait être vérifiée, et l'application serait fermée à tous.
+#
+# CE QUI N'EST PAS ICI, ET NE DOIT JAMAIS Y ÊTRE
+# ----------------------------------------------
+# La clé PRIVÉE de signature de Novia. Elle vit sur le serveur Novia et nulle
+# part ailleurs. L'application n'embarque que la clé PUBLIQUE, qui ne permet
+# QUE de vérifier une signature — jamais d'en fabriquer une.
+
+import os as _os
+
+
+def _env_texte(nom: str, defaut: str = "") -> str:
+    return (_os.getenv(nom, "") or defaut).strip()
+
+
+def _env_nombre(nom: str, defaut: float, minimum: float, maximum: float) -> float:
+    """Nombre lu dans l'environnement, BORNÉ.
+
+    Borné, parce qu'une période hors ligne réglée à 100 000 jours par une
+    variable d'environnement transformerait une licence mensuelle en licence
+    perpétuelle. Les bornes sont les limites raisonnables du produit, pas une
+    préférence de l'utilisateur.
+    """
+    brut = _env_texte(nom)
+    if not brut:
+        return defaut
+    try:
+        valeur = float(brut)
+    except ValueError:
+        import logging
+        logging.getLogger(__name__).error(
+            "[novia] %s illisible (« %s ») : %s retenu", nom, brut, defaut)
+        return defaut
+    return max(minimum, min(maximum, valeur))
+
+
+# URL de l'API de licences Novia — À RENSEIGNER quand le serveur existe.
+# Volontairement VIDE : l'URL définitive n'est pas connue, et une URL inventée
+# enverrait les clés de licence des clients vers un domaine qui n'est pas le
+# vôtre. HTTPS obligatoire (vérifié par novia_client.py).
+NOVIA_API_URL_DEFAUT = ""
+
+# Identifiant du produit côté Novia. Permet à un même serveur de licences de
+# servir plusieurs applications : une licence Agence 46 n'active pas une autre
+# application Novia, et inversement.
+NOVIA_PRODUIT_DEFAUT = "agence46"
+
+# Clés PUBLIQUES Ed25519 de Novia, indexées par identifiant (`kid` de l'en-tête
+# du jeton). Plusieurs clés = rotation sans interruption : Novia signe avec la
+# nouvelle pendant que les jetons émis avec l'ancienne restent vérifiables
+# jusqu'à leur échéance. Format : 64 caractères hexadécimaux (32 octets).
+#
+# VIDE tant que Novia n'a pas généré sa paire de clés. Une clé publique n'est
+# pas un secret : le jour venu, elle a sa place ici, en clair, dans le dépôt.
+NOVIA_CLES_PUBLIQUES: dict = {}
+
+# Pages du site Novia. Centralisées ICI et nulle part ailleurs : l'interface
+# les reçoit par l'API locale, elle ne les écrit jamais en dur.
+NOVIA_URL_ACHAT_DEFAUT = ""        # « Acheter Agence 46 »
+NOVIA_URL_COMPTE_DEFAUT = ""       # « Gérer mon abonnement »
+
+# Nombre de jours pendant lesquels l'application fonctionne SANS contacter le
+# serveur après une validation réussie. Le serveur fixe sa propre limite dans
+# le jeton signé ; cette valeur ne peut que la RACCOURCIR, jamais l'allonger.
+OFFLINE_GRACE_PERIOD_JOURS = _env_nombre("OFFLINE_GRACE_PERIOD", 30, 1, 90)
+
+# Intervalle entre deux revalidations en ligne. Aucune requête n'est faite à
+# chaque démarrage : la licence locale signée fait foi entre deux contrôles.
+LICENSE_CHECK_INTERVAL_JOURS = _env_nombre("LICENSE_CHECK_INTERVAL", 7, 1, 30)
+
+# Que devient l'application quand la licence EXPIRE ?
+#   "limite"  — mode gratuit : fonctionnalités de base, limites de l'essai.
+#   "bloque"  — application fermée jusqu'au renouvellement.
+# Dans les deux cas, les projets et les données locales restent intacts.
+LICENSE_EXPIRED_POLICY = _env_texte("LICENSE_EXPIRED_POLICY", "limite").lower()
+if LICENSE_EXPIRED_POLICY not in ("limite", "bloque"):
+    LICENSE_EXPIRED_POLICY = "limite"
+
+# Niveaux de licence. Seuls ceux de NIVEAUX_PREMIUM ouvrent l'accès complet ;
+# FREE applique les limites de la version d'essai. Ajouter un niveau ici suffit
+# à le reconnaître partout — c'est le seul endroit qui les énumère.
+NIVEAUX_LICENCE = ("FREE", "PRO", "BUSINESS", "ENTERPRISE")
+NIVEAUX_PREMIUM = frozenset({"PRO", "BUSINESS", "ENTERPRISE"})
+
+# Tolérance d'horloge pour les dates signées par le serveur (secondes).
+NOVIA_TOLERANCE_HORLOGE_S = 300
+
+# Recul d'horloge au-delà duquel l'événement est journalisé comme suspect.
+NOVIA_RECUL_HORLOGE_SUSPECT_S = 24 * 3600
+
+
+def novia_api_url() -> str:
+    """URL de l'API Novia retenue, SANS barre finale. Vide si non configurée."""
+    return _env_texte("LICENSE_API_URL", NOVIA_API_URL_DEFAUT).rstrip("/")
+
+
+def novia_produit() -> str:
+    return _env_texte("LICENSE_PRODUCT_ID", NOVIA_PRODUIT_DEFAUT) or "agence46"
+
+
+def novia_cles_publiques() -> dict:
+    """Clés publiques connues : celles du paquet, plus `LICENSE_PUBLIC_KEY`.
+
+    La variable d'environnement sert au développement et aux tests ; elle
+    s'AJOUTE au jeu embarqué sous l'identifiant « env » et ne peut en retirer
+    aucune.
+    """
+    cles = dict(NOVIA_CLES_PUBLIQUES)
+    env = _env_texte("LICENSE_PUBLIC_KEY")
+    if env:
+        cles.setdefault("env", env)
+    return cles
+
+
+def novia_url_achat() -> str:
+    return _env_texte("LICENSE_PURCHASE_URL", NOVIA_URL_ACHAT_DEFAUT)
+
+
+def novia_url_compte() -> str:
+    return _env_texte("LICENSE_ACCOUNT_URL", NOVIA_URL_COMPTE_DEFAUT)
+
+
+def novia_actif() -> bool:
+    """Le mode licence Novia est-il en service ?
+
+    URL ET clé publique : l'une sans l'autre ne permet pas d'activer quoi que
+    ce soit, et basculer quand même fermerait l'application à tout le monde.
+    """
+    return bool(novia_api_url() and novia_cles_publiques())
+
+
+def novia_configuration_incomplete() -> str:
+    """Explication si la configuration est à moitié faite, vide sinon."""
+    url, cles = novia_api_url(), novia_cles_publiques()
+    if url and not cles:
+        return ("LICENSE_API_URL est renseignée mais aucune clé publique Novia "
+                "n'est configurée : le mode Novia reste désactivé.")
+    if cles and not url:
+        return ("Une clé publique Novia est configurée mais pas LICENSE_API_URL : "
+                "le mode Novia reste désactivé.")
+    return ""

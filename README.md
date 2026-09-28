@@ -304,6 +304,23 @@ plutôt que de simuler quoi que ce soit.
 L'application est également disponible sur le
 [Microsoft Store](https://apps.microsoft.com/detail/9nltgfr2btsp?hl=fr-FR&gl=FR).
 
+### Licences Agence Novia
+
+Agence 46 peut aussi s'activer avec une licence achetée sur le site
+**Agence Novia** (`NOVIA-XXXX-XXXX-XXXX-XXXX`). L'application reste
+**100 % locale** : seule la licence est vérifiée en ligne, au plus tous les
+7 jours, et elle fonctionne hors ligne jusqu'à 30 jours sur la foi d'une
+licence signée Ed25519 vérifiée avec la clé **publique** embarquée.
+
+Ce mode s'active quand l'URL de l'API Novia et sa clé publique sont
+renseignées (`python/licence/config.py`, section « LICENCES AGENCE NOVIA ») ;
+sans elles, l'application garde le fonctionnement décrit plus haut. Toute la
+logique vit dans `python/licence/license_manager.py`.
+
+- Spécification pour le serveur Novia :
+  [`docs/novia-licensing-integration.md`](docs/novia-licensing-integration.md)
+- Ce qui change : [`RELEASE_NOTES_4.3.0.md`](RELEASE_NOTES_4.3.0.md)
+
 ## Code d'accès : aucun par défaut
 
 L'application ne demande **aucun code** au lancement. Elle s'ouvre
@@ -380,6 +397,10 @@ d'environnement de l'hébergeur — sans toucher une ligne de code.
 │   │   ├── emetteur.py        signature des licences (clé PRIVÉE hors dépôt)
 │   │   ├── cles.py            clés d'abonnement AGF-… (empreinte seule en base)
 │   │   ├── notifications.py   remise de la clé par e-mail et SMS
+│   │   ├── license_manager.py licences Novia : activation, hors ligne, révocation
+│   │   ├── license_state.py   états NOT_ACTIVATED…INVALID, niveaux FREE…ENTERPRISE
+│   │   ├── jeton_novia.py     vérification des jetons JWT EdDSA
+│   │   ├── novia_client.py    client HTTPS de l'API Novia (seul accès réseau)
 │   │   └── quota.py           compteur de requêtes, par compte, en base
 │   ├── utils/
 │   │   ├── auto_trader.py     boucle autonome (analyse → protections → ordre)
@@ -420,6 +441,9 @@ d'environnement de l'hébergeur — sans toucher une ligne de code.
 ├── build_exe.bat          compile l'application seule
 ├── runtime/               moteurs embarqués (généré, non versionné)
 ├── dist/                  sortie du build (application + installateur/)
+├── docs/
+│   └── novia-licensing-integration.md   spécification du serveur de licences
+├── RELEASE_NOTES_4.3.0.md note de version 4.3.0 (licences Agence Novia)
 ├── RELEASE_NOTES_4.2.0.md note de version 4.2.0 (clés d'abonnement, envoi)
 ├── RELEASE_NOTES_4.1.0.md note de version 4.1.0 (comptes, essai, abonnement)
 ├── RELEASE_NOTES_TRIAL.md note de version de l'essai (limites appliquées)

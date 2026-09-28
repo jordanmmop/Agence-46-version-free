@@ -225,14 +225,17 @@ try:
     from backend.routes.licence import router as _licence_router
     from backend.routes.comptes import router as _comptes_router
     from backend.routes.abonnement import router as _abonnement_router
+    from backend.routes.activation import router as _activation_router
 except ImportError:                     # exécution directe « python backend/main.py »
     from routes.licence import router as _licence_router
     from routes.comptes import router as _comptes_router
     from routes.abonnement import router as _abonnement_router
+    from routes.activation import router as _activation_router
 
 app.include_router(_licence_router)
 app.include_router(_comptes_router)
 app.include_router(_abonnement_router)
+app.include_router(_activation_router)
 
 
 # ── Fermeture de l'application sans compte ni abonnement ──────────────────
@@ -263,6 +266,9 @@ _COMPTE_PUBLIC_PREFIXES = ("/icons/", "/css/", "/js/", "/static/",
                            # /setup/state et /setup/mode : l'écran de premier
                            # lancement ne peut pas fonctionner sans eux.
                            "/setup/",
+                           # Mode Novia : activer une licence est précisément
+                           # ce qu'on fait quand on n'en a pas encore.
+                           "/api/activation",
                            # Moteur IA local. L'écran de premier lancement les
                            # interroge pour détecter, installer et démarrer
                            # Ollama ou Hermès — AVANT qu'un compte existe.
@@ -318,19 +324,33 @@ async def _compte_middleware(request: Request, call_next):
 
     jeton_ctx = comptes.definir_compte_courant(compte)
     try:
-        if (not lconfig.COMPTE_OBLIGATOIRE
+        # Mode Novia : la licence est TOUJOURS exigée, quel que soit le
+        # réglage du compte local — c'est elle qui ouvre l'application.
+        if ((not lconfig.COMPTE_OBLIGATOIRE and not lconfig.novia_actif())
                 or request.method == "OPTIONS"
                 or _chemin_ouvert_sans_compte(request.url.path)):
             return await call_next(request)
 
-        etat = comptes.etat_du_compte(compte)
+        # Point de décision UNIQUE : le compte local, ou la licence Novia
+        # quand elle est configurée (licence/abonnement.py).
+        from licence import abonnement as _abonnement
+        etat = _abonnement.etat_acces(compte)
         if etat.utilisable:
             return await call_next(request)
 
-        from licence.gate import AbonnementRequis, CompteRequis
-        refus = (CompteRequis().payload() if etat is EtatLicence.COMPTE_REQUIS
-                 else AbonnementRequis(etat).payload())
-        code = 401 if etat is EtatLicence.COMPTE_REQUIS else 402
+        from licence.gate import AbonnementRequis, CompteRequis, LicenceRequise
+        if etat is EtatLicence.LICENCE_REQUISE:
+            refus = LicenceRequise(_abonnement.etat_complet().get("message", "")).payload()
+            code = 401
+        elif etat is EtatLicence.COMPTE_REQUIS:
+            refus, code = CompteRequis().payload(), 401
+        else:
+            refus = AbonnementRequis(etat).payload()
+            code = 402
+            if lconfig.novia_actif():
+                # Licence expirée en politique « bloque » : l'interface doit
+                # proposer de renouveler sur Novia, pas le paiement Stripe.
+                refus["licence_requise"] = True
 
         # Une PAGE demandée par le navigateur ne doit JAMAIS recevoir du JSON :
         # l'utilisateur se retrouve devant `{"error": "Créez un compte…"}` en
@@ -349,8 +369,14 @@ async def _compte_middleware(request: Request, call_next):
         comptes.reinitialiser_compte_courant(jeton_ctx)
 
 
-from licence.gate import (AbonnementRequis, CompteRequis,
+from licence.gate import (AbonnementRequis, CompteRequis, LicenceRequise,
                           ProRequis, QuotaDepasse)
+
+
+@app.exception_handler(LicenceRequise)
+async def _handler_licence_requise(request: Request, exc: LicenceRequise):
+    """401 : mode Novia, aucune licence valide. L'interface montre l'activation."""
+    return JSONResponse(status_code=401, content=exc.payload())
 
 
 @app.exception_handler(ProRequis)
@@ -445,6 +471,41 @@ def normaliser_symboles(brut, maximum: int = 10) -> list:
         if s and s not in propres:
             propres.append(s)
     return propres[:maximum]
+
+
+@app.on_event("startup")
+async def _revalidation_licence_novia():
+    """Revalide la licence Novia en arrière-plan, quand elle est DUE.
+
+    Jamais à chaque démarrage, jamais sur le chemin d'une requête : le fil se
+    réveille toutes les heures, et le LicenseManager décide s'il y a lieu
+    d'appeler Novia (tous les LICENSE_CHECK_INTERVAL jours, ou avant
+    l'épuisement de la période hors ligne). Hors ligne, rien ne bloque :
+    la licence locale signée continue de faire foi.
+
+    Rien ne démarre en mode compte local : aucune requête réseau n'a lieu
+    tant que Novia n'est pas configuré.
+    """
+    from licence import config as lconfig
+    if not lconfig.novia_actif():
+        return
+    import threading
+
+    def _boucle():
+        import time as _t
+        from licence import abonnement as _abonnement
+        from licence import license_manager
+        _t.sleep(30)                      # laisser l'interface démarrer d'abord
+        while True:
+            try:
+                resultat = license_manager.manager().revalider()
+                if resultat.get("success") is not None:
+                    _abonnement.invalider_cache()
+            except Exception as e:        # jamais d'arrêt du fil sur une panne
+                logger.warning("[licence] Revalidation Novia : %s", e)
+            _t.sleep(3600)
+
+    threading.Thread(target=_boucle, name="revalidation-licence", daemon=True).start()
 
 
 @app.on_event("startup")

@@ -40,6 +40,27 @@ class CompteRequis(Exception):
         }
 
 
+class LicenceRequise(Exception):
+    """Mode Novia : aucune licence valide n'est activée sur cette installation.
+
+    Traduite en 401 : l'interface montre alors l'écran « Activation de votre
+    licence », jamais un message d'erreur brut. Le message vient du
+    LicenseManager — il dit POURQUOI (clé jamais saisie, jeton d'un autre
+    appareil, licence expirée…).
+    """
+
+    def __init__(self, message: str = ""):
+        super().__init__(message)
+        self.message = message
+
+    def payload(self) -> Dict[str, Any]:
+        return {
+            "error": self.message or EtatLicence.LICENCE_REQUISE.message,
+            "licence_requise": True,
+            "etat": EtatLicence.LICENCE_REQUISE.value,
+        }
+
+
 class AbonnementRequis(Exception):
     """Compte existant, mais essai écoulé ou abonnement échu.
 
@@ -320,22 +341,30 @@ def etat_public(tous_les_agents: Sequence = ()) -> Dict[str, Any]:
     autorises = ids_agents_autorises(tous_les_agents) if total else []
     courant = comptes.compte_courant()
 
+    novia = lconfig.novia_actif()
     return {
         "etat": etat.value,
-        "libelle": etat.libelle,
+        "libelle": infos.get("libelle") or etat.libelle,
         "message": infos.get("message", etat.message),
         "est_pro": pro,
         # L'interface s'en sert pour choisir SON ÉCRAN : inscription,
-        # tableau de bord, ou mur de paiement.
+        # activation de licence, tableau de bord, ou mur de paiement.
         "utilisable": etat.utilisable,
-        "compte_requis": etat is EtatLicence.COMPTE_REQUIS,
-        "compte_suspendu": etat.compte_suspendu,
+        "mode_licence": "novia" if novia else "compte",
+        # Mode Novia : toute situation qui ferme l'application renvoie vers
+        # l'écran d'activation — jamais vers l'inscription ni vers Stripe, qui
+        # appartiennent au site Novia.
+        "licence_requise": novia and not etat.utilisable,
+        "compte_requis": (not novia) and etat is EtatLicence.COMPTE_REQUIS,
+        "compte_suspendu": (not novia) and etat.compte_suspendu,
         "compte": comptes.public(courant),
         "essai": {
             "jours": lconfig.TRIAL_DUREE_JOURS,
             "fin": infos.get("essai_fin"),
             "jours_restants": infos.get("essai_jours_restants"),
-            "en_cours": etat is EtatLicence.TRIAL,
+            # Le bandeau « essai gratuit — N jours » n'a pas de sens en mode
+            # Novia, où le régime limité est celui d'une licence FREE.
+            "en_cours": (not novia) and etat is EtatLicence.TRIAL,
         },
         "paiement": stripe_paiement.etat_paiement(
             (courant or {}).get("id", "")),

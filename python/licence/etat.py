@@ -24,6 +24,9 @@ from enum import Enum
 
 class EtatLicence(str, Enum):
     COMPTE_REQUIS = "COMPTE_REQUIS"
+    # Mode licence Novia : aucune licence activée sur cette installation.
+    # Pendant de COMPTE_REQUIS — l'application attend une clé, pas un compte.
+    LICENCE_REQUISE = "LICENCE_REQUISE"
     TRIAL = "TRIAL"
     TRIAL_EXPIRED = "TRIAL_EXPIRED"
     PRO_ACTIVE = "PRO_ACTIVE"
@@ -78,6 +81,7 @@ class EtatLicence(str, Enum):
 
 _LIBELLES = {
     EtatLicence.COMPTE_REQUIS:    "Compte requis",
+    EtatLicence.LICENCE_REQUISE:  "Licence requise",
     EtatLicence.TRIAL:            "Essai gratuit",
     EtatLicence.TRIAL_EXPIRED:    "Essai terminé",
     EtatLicence.PRO_ACTIVE:       "Abonnement Pro actif",
@@ -87,6 +91,8 @@ _LIBELLES = {
 }
 
 _MESSAGES = {
+    EtatLicence.LICENCE_REQUISE:
+        "Activez votre licence Agence 46 pour utiliser l'application.",
     EtatLicence.COMPTE_REQUIS:
         "Créez un compte ou connectez-vous pour utiliser l'application. "
         "L'inscription ouvre un essai gratuit de 3 jours.",

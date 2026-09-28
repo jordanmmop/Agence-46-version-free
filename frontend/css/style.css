@@ -1971,6 +1971,52 @@ body {
 .lic-detail a:hover,
 .lic-intro a:hover { color: var(--text); }
 
+/* ── Licence Agence Novia : écran d'activation et fiche des réglages ── */
+.act-box { max-width: 520px; }
+.act-alerte {
+  background: var(--surface2);
+  border: 1px solid rgba(216, 160, 61, 0.3);
+  border-left: 2px solid var(--yellow);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem;
+  margin: 0.6rem 0;
+  font-size: 0.78rem;
+  color: var(--text);
+  line-height: 1.5;
+}
+.act-aide {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+  margin-top: 0.6rem;
+}
+.act-aide a { color: var(--accent); }
+.act-fiche {
+  background: var(--surface2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 0.9rem;
+  margin-bottom: 0.7rem;
+}
+.act-titre-offre { font-size: 1.05rem; font-weight: 700; margin-bottom: 0.55rem; }
+.act-grille {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 0.3rem 0.9rem;
+  margin: 0;
+  font-size: 0.8rem;
+}
+.act-grille dt { color: var(--text-muted); }
+.act-grille dd { margin: 0; font-variant-numeric: tabular-nums; word-break: break-word; }
+.act-statut { font-weight: 600; }
+.act-active, .act-offline_valid { color: var(--green); }
+.act-expired, .act-suspended { color: var(--yellow); }
+.act-revoked, .act-invalid { color: var(--red); }
+@media (max-width: 520px) {
+  .act-grille { grid-template-columns: 1fr; }
+  .act-grille dd { margin-bottom: 0.35rem; }
+}
+
 /* ── Clé d'abonnement remise après paiement ── */
 /* Elle n'est lisible qu'une fois : elle doit donc sauter aux yeux et se
    sélectionner d'un geste, sans que l'utilisateur ait à viser au caractère. */
