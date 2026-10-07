@@ -67,6 +67,13 @@ DELAI_NOUVEL_ESSAI_S = 6 * 3600
 # En deçà, la revalidation devient due même avant LICENSE_CHECK_INTERVAL :
 # une licence ne doit pas s'éteindre faute d'avoir été revérifiée à temps.
 MARGE_AVANT_FIN_HORS_LIGNE_S = 2 * JOUR
+# Refus de Novia qu'un PAIEMENT peut lever : licence expirée (essai fini,
+# abonnement échu) ou suspendue (impayé). Ils sont retentés toutes les
+# DELAI_NOUVEL_ESSAI_S : sans cela, un client qui renouvelle — ou qui achète
+# après la fin de son essai — resterait bloqué tant qu'il ne pense pas à
+# cliquer « Actualiser la licence ». Une licence révoquée ou une clé invalide
+# ne se rattrapent pas par un paiement : elles ne sont pas retentées.
+ETATS_RATTRAPABLES = ("EXPIRED", "SUSPENDED")
 # Décalage entre horloge locale et heure signée au-delà duquel on prévient.
 DECALAGE_SIGNALE_S = JOUR
 # L'heure vue n'est réécrite sur disque que si elle a avancé d'au moins ceci.
@@ -326,8 +333,22 @@ class LicenseManager:
             "horloge_reculee": bool(donnees.get("recul_signale")),
             "horloge_decalee": bool(donnees.get("horloge_decalee")),
             "derniere_erreur": donnees.get("derniere_erreur", ""),
-            "revalidation_due": bool(rev) and self._revalidation_due(donnees, rev, locale),
+            "revalidation_due": (self._revalidation_due(donnees, rev, locale) if rev
+                                 else self._reprise_due(donnees, locale)),
         }
+
+    def _reprise_due(self, donnees: Dict[str, Any], locale: float) -> bool:
+        """Faut-il redemander à Novia une licence qu'il a refusée ?
+
+        Seulement pour un refus RATTRAPABLE (expirée, suspendue), et au plus
+        toutes les DELAI_NOUVEL_ESSAI_S — une installation abandonnée ne doit
+        pas solliciter le serveur à chaque heure.
+        """
+        if not donnees.get("cle"):
+            return False
+        if str(donnees.get("statut_serveur") or "") not in ETATS_RATTRAPABLES:
+            return False
+        return locale - float(donnees.get("derniere_tentative") or 0) >= DELAI_NOUVEL_ESSAI_S
 
     def _revalidation_due(self, donnees: Dict[str, Any], rev: Dict[str, Any],
                           locale: float) -> bool:

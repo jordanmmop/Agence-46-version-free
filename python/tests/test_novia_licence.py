@@ -301,6 +301,51 @@ def test_renouvellement():
     print("  OK — renouvellement : nouvelle échéance reprise au contrôle suivant")
 
 
+def test_reprise_automatique_apres_paiement():
+    """Essai fini puis achat : l'application repart SEULE, avec la même clé.
+
+    Sans reprise, un refus « expirée » de Novia effaçait le jeton et plus
+    aucune revalidation n'avait lieu : le client qui achetait après son essai
+    restait bloqué jusqu'à cliquer « Actualiser ». Constaté sur le vrai
+    serveur Novia, qui convertit l'essai en licence payée (même clé).
+    """
+    b = Banc()
+    cle = b.novia.creer_licence("PRO", duree_jours=3)          # essai de 3 jours
+    b.m.activer(cle)
+    b.horloge.avancer(4)
+    assert b.m.revalider()["etat"] == "EXPIRED"
+    assert "jeton" not in b.stockage()
+
+    b.novia.licences[cle]["expire"] = b.horloge() + 30 * JOUR   # achat : même clé
+    nb = lambda: len(b.novia.requetes)
+    avant = nb()
+    b.horloge.t += 3600
+    b.m.revalider()                                             # boucle horaire
+    assert nb() == avant, "pas de rafale : un essai toutes les 6 heures au plus"
+    b.horloge.t += 6 * 3600
+    r = b.m.revalider()
+    assert nb() == avant + 1
+    assert r["etat"] == "ACTIVE" and r["premium"] is True, r
+    assert r["expire_le"] > b.horloge() + 29 * JOUR
+
+    # Suspendue (impayé) puis régularisée : même reprise.
+    b.novia.licences[cle]["statut"] = "SUSPENDED"
+    assert b.m.revalider(forcer=True)["etat"] == "SUSPENDED"
+    b.novia.licences[cle]["statut"] = "ACTIVE"
+    b.horloge.t += 6 * 3600 + 1
+    assert b.m.revalider()["etat"] == "ACTIVE"
+
+    # Révoquée : décision définitive, jamais retentée d'elle-même.
+    b.novia.licences[cle]["statut"] = "REVOKED"
+    assert b.m.revalider(forcer=True)["etat"] == "REVOKED"
+    avant = nb()
+    for _ in range(5):
+        b.horloge.avancer(1)
+        b.m.revalider()
+    assert nb() == avant, "une licence révoquée n'est pas retentée"
+    print("  OK — reprise automatique après paiement (expirée, suspendue), jamais après révocation")
+
+
 def test_periode_hors_ligne_locale_ne_peut_que_raccourcir():
     from licence import config as lconfig
     b = Banc(hors_ligne_jours=60)                # le serveur accorde 60 jours
@@ -942,6 +987,7 @@ def run():
             test_depassement_d_appareils, test_fonctionnement_hors_ligne_apres_activation,
             test_absence_internet_a_l_activation, test_serveur_indisponible,
             test_validation_periodique_sans_marteler, test_renouvellement,
+            test_reprise_automatique_apres_paiement,
             test_periode_hors_ligne_locale_ne_peut_que_raccourcir,
             test_validation_du_jeton, test_signature_invalide,
             test_reponse_valide_sans_jeton_refusee, test_https_obligatoire,

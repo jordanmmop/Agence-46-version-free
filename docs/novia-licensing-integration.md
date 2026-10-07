@@ -179,6 +179,14 @@ Quand la réponse est un refus explicite (`EXPIRED`, `SUSPENDED`, `REVOKED`,
 `INVALID_KEY`, `INSTALLATION_NOT_FOUND`), l'application **efface son jeton
 local** : une licence révoquée ne survit pas jusqu'à son `offline_until`.
 
+Les refus qu'un paiement peut lever — `EXPIRED` (essai terminé, abonnement
+échu) et `SUSPENDED` (impayé) — sont redemandés seuls, au plus toutes les
+6 heures, avec la clé enregistrée : un client qui achète après son essai ou
+qui régularise son paiement retrouve l'accès sans rien ressaisir, à condition
+que Novia **garde la même clé** (conversion de l'essai en licence payée). Les
+refus définitifs (`REVOKED`, `INVALID_KEY`, `INSTALLATION_NOT_FOUND`) ne sont
+jamais retentés d'eux-mêmes.
+
 ---
 
 ## 6. `POST /api/license/deactivate`

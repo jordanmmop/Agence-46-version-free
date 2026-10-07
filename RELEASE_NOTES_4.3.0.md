@@ -81,6 +81,10 @@ le formulaire d'inscription en 4.1.0 ne peut pas se reproduire ici.
   90 maximum ; la valeur locale ne peut que **raccourcir** celle du serveur).
 - Revalidation **au plus tous les 7 jours**, jamais à chaque démarrage ;
   hors ligne, un essai toutes les 6 heures au plus.
+- Licence **expirée ou suspendue** : redemandée seule toutes les 6 heures,
+  avec la même clé — l'achat après l'essai (ou le paiement régularisé)
+  débloque l'application sans rien ressaisir. Une licence révoquée n'est
+  jamais redemandée.
 - **Reculer l'horloge de l'ordinateur ne rend aucun jour** : l'application
   retient la plus grande heure observée, et la date signée du jeton sert de
   plancher. Une horloge en avance se rétablit à la première validation en
