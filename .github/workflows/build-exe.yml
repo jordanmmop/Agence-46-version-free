@@ -3,6 +3,9 @@ name: Build Windows EXE
 on:
   push:
     branches: [main]
+    # Une version (tag v4.3.1…) publie l'installeur dans une GitHub Release,
+    # téléchargée par les abonnés depuis leur espace MyWorkflow (novia.contact).
+    tags: ["v*"]
     paths:
       - "backend/**"
       - "python/**"
@@ -16,6 +19,9 @@ on:
       - "app_window.py"
       - ".github/workflows/build-exe.yml"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -129,6 +135,17 @@ jobs:
           path: dist/installateur/*
           retention-days: 30
 
+      # Nom stable, pour un lien qui suit toujours la dernière version :
+      # https://github.com/jordanmmop/Agence-46-version-free/releases/latest/download/AgenceNumerique-Setup.exe
+      - name: Stable installer name (if tagged)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\installateur\AgenceNumerique-Setup-*.exe | Select-Object -First 1
+          if (-not $setup) { throw "installeur introuvable dans dist\installateur" }
+          New-Item -ItemType Directory -Force dist\release | Out-Null
+          Copy-Item $setup.FullName dist\release\AgenceNumerique-Setup.exe
+
       - name: Upload to Release (if tagged)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
@@ -136,3 +153,4 @@ jobs:
           files: |
             AgenceNumerique-Windows.zip
             dist/installateur/*
+            dist/release/AgenceNumerique-Setup.exe
